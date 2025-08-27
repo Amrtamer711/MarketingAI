@@ -1180,6 +1180,24 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         scope = df[df['__filming_date'].apply(in_period)].copy()
         logger.info(f"Tasks in scope (filtered by filming date): {len(scope)}")
         
+        # Handle empty data
+        if len(scope) == 0 or len(df) == 0:
+            return {
+                "period": period,
+                "mode": mode,
+                "stats": {
+                    "total_requests": 0,
+                    "assigned": 0,
+                    "uploads": 0,
+                    "rejected": 0,
+                    "submitted": 0,
+                    "returned": 0,
+                    "accepted": 0
+                },
+                "videographer_stats": [],
+                "task_details": []
+            }
+        
         # Calculate metrics based on version history
         total = int(scope.shape[0])
         assigned = int((scope['Videographer'].fillna('') != '').sum())
