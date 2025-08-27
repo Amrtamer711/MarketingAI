@@ -3,6 +3,7 @@ services:
   - type: web
     name: videocritique-bot
     runtime: python
+    pythonVersion: "3.11"
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python startup.py && uvicorn app:api --host 0.0.0.0 --port $PORT"
     envVars:
@@ -41,6 +42,7 @@ services:
   - type: cron
     name: task-assignment
     runtime: python
+    pythonVersion: "3.11"
     schedule: "0 9 * * *"  # Daily at 9 AM UTC (1 PM UAE)
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python assignment.py"

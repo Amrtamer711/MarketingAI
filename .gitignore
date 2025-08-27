@@ -16,6 +16,7 @@ ENV/
 # Data files (contain sensitive info)
 data/
 /data/
+render_data/
 *.xlsx
 *.db
 dropbox_creds.json
