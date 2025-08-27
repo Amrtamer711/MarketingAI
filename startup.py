@@ -20,6 +20,56 @@ def ensure_directories():
         os.makedirs(directory, exist_ok=True)
         print(f"✅ Ensured directory exists: {directory}")
 
+def ensure_history_database():
+    """Create or update the history database with proper schema"""
+    import sqlite3
+    
+    try:
+        with sqlite3.connect(HISTORY_DB_PATH) as conn:
+            # Create the table with all columns
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS completed_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_number INTEGER,
+                    brand TEXT,
+                    campaign_start_date TEXT,
+                    campaign_end_date TEXT,
+                    reference_number TEXT,
+                    location TEXT,
+                    sales_person TEXT,
+                    submitted_by TEXT,
+                    status TEXT,
+                    filming_date TEXT,
+                    videographer TEXT,
+                    current_version TEXT,
+                    version_history TEXT,
+                    pending_timestamps TEXT,
+                    submitted_timestamps TEXT,
+                    returned_timestamps TEXT,
+                    rejected_timestamps TEXT,
+                    accepted_timestamps TEXT,
+                    completed_at TEXT
+                );
+            """)
+            
+            # Create index on task_number for faster lookups
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_task_number 
+                ON completed_tasks(task_number);
+            """)
+            
+            # Create index on reference_number for duplicate checking
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reference_number 
+                ON completed_tasks(reference_number);
+            """)
+            
+            conn.commit()
+            print(f"✅ History database initialized at {HISTORY_DB_PATH}")
+            
+    except Exception as e:
+        print(f"❌ Error initializing history database: {e}")
+
 def ensure_files():
     """Ensure required files exist"""
     # Check Excel file
@@ -33,6 +83,9 @@ def ensure_files():
         print(f"✅ Created new Excel file at {EXCEL_FILE_PATH}")
     else:
         print(f"✅ Excel file exists at {EXCEL_FILE_PATH}")
+    
+    # Check/Create SQLite history database
+    ensure_history_database()
     
     # Check Dropbox credentials
     if not os.path.exists(CREDENTIALS_PATH):
