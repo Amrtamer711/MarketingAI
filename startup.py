@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""
+Startup script to ensure required directories and files exist
+Run this before starting the main application
+"""
+
+import os
+import shutil
+from pathlib import Path
+from config import EXCEL_FILE_PATH, HISTORY_DB_PATH, CREDENTIALS_PATH, DATA_DIR
+
+def ensure_directories():
+    """Create required directories if they don't exist"""
+    directories = [
+        "uploads",  # For temporary file uploads
+        DATA_DIR,    # Create data directory based on environment
+    ]
+    
+    for directory in directories:
+        os.makedirs(directory, exist_ok=True)
+        print(f"✅ Ensured directory exists: {directory}")
+
+def ensure_files():
+    """Ensure required files exist"""
+    # Check Excel file
+    if not os.path.exists(EXCEL_FILE_PATH):
+        print(f"⚠️  Excel file not found at {EXCEL_FILE_PATH}")
+        # Create empty Excel file with headers
+        import pandas as pd
+        from excel_utils import initialize_excel
+        import asyncio
+        asyncio.run(initialize_excel())
+        print(f"✅ Created new Excel file at {EXCEL_FILE_PATH}")
+    else:
+        print(f"✅ Excel file exists at {EXCEL_FILE_PATH}")
+    
+    # Check Dropbox credentials
+    if not os.path.exists(CREDENTIALS_PATH):
+        print(f"❌ CRITICAL: Dropbox credentials not found at {CREDENTIALS_PATH}")
+        print("   Please upload your dropbox_creds.json file to the data directory")
+    else:
+        print(f"✅ Dropbox credentials found at {CREDENTIALS_PATH}")
+
+def ensure_config_files():
+    """Ensure required configuration files exist in data directory"""
+    # Check if videographer_config.json exists in data
+    config_path = f"{DATA_DIR}/videographer_config.json"
+    
+    if not os.path.exists(config_path):
+        # Try to copy from local if exists
+        local_config = "videographer_config.json"
+        if os.path.exists(local_config):
+            shutil.copy(local_config, config_path)
+            print(f"✅ Copied {local_config} to {config_path}")
+        else:
+            # Create default config
+            import json
+            default_config = {
+                "videographers": {},
+                "sales_people": {},
+                "location_mappings": {},
+                "reviewer": {},
+                "hod": {}
+            }
+            with open(config_path, 'w') as f:
+                json.dump(default_config, f, indent=4)
+            print(f"✅ Created default config at {config_path}")
+    else:
+        print(f"✅ Config file exists at {config_path}")
+
+def main():
+    """Run all startup checks"""
+    print("🚀 Running startup checks...")
+    
+    ensure_directories()
+    ensure_files()
+    ensure_config_files()
+    
+    print("\n✅ Startup checks complete!")
+
+if __name__ == "__main__":
+    main()

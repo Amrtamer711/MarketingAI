@@ -1,0 +1,1 @@
+# Makes VideoCritique a package for absolute imports 

@@ -1,0 +1,52 @@
+services:
+  # Main web service
+  - type: web
+    name: videocritique-bot
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python startup.py && uvicorn app:api --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_SIGNING_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TRELLO_API_KEY
+        sync: false
+      - key: TRELLO_API_TOKEN
+        sync: false
+      - key: EMAIL_SENDER
+        sync: false
+      - key: APP_PSWD
+        sync: false
+      - key: REVIEWER_EMAIL
+        sync: false
+      - key: HEAD_OF_DEPT_EMAIL
+        sync: false
+      - key: BOARD_NAME
+        value: "Marketing Sites Videos"
+      - key: BOT_USER_ID
+        sync: false
+      - key: HEAD_OF_SALES_EMAIL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+    disk:
+      name: videocritique-data
+      mountPath: /data
+      sizeGB: 1
+
+  # Daily task assignment cron job
+  - type: cron
+    name: task-assignment
+    runtime: python
+    schedule: "0 9 * * *"  # Daily at 9 AM UTC (1 PM UAE)
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python assignment.py"
+    envVars:
+      - fromGroup: videocritique-bot
+    disk:
+      name: videocritique-data
+      mountPath: /data
+      sizeGB: 1
