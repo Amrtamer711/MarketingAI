@@ -26,8 +26,8 @@ class ExcelLockManager:
         self.retry_delay = 0.1  # 100ms between retries
         
     @contextmanager
-    def acquire_lock(self, operation: str = "write"):
-        """Acquire exclusive lock for Excel file operations"""
+    def acquire_lock(self, operation: str = "write", shared: bool = False):
+        """Acquire file lock for Excel operations; shared=True uses LOCK_SH (read), else LOCK_EX (write)."""
         lock_fd = None
         start_time = time.time()
         
@@ -35,11 +35,12 @@ class ExcelLockManager:
             # Create lock file if it doesn't exist
             lock_fd = os.open(self.lock_file, os.O_CREAT | os.O_WRONLY)
             
-            # Try to acquire exclusive lock
+            # Try to acquire lock
             while True:
                 try:
-                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    logger.debug(f"Acquired Excel lock for {operation}")
+                    mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+                    fcntl.flock(lock_fd, mode | fcntl.LOCK_NB)
+                    logger.debug(f"Acquired Excel lock for {operation} ({'SH' if shared else 'EX'})")
                     break
                 except IOError:
                     # Lock is held by another process
@@ -101,37 +102,45 @@ excel_lock = ExcelLockManager(lock_timeout=30)
 # Enhanced Excel operations with locking
 async def safe_read_excel() -> pd.DataFrame:
     """Read Excel file with shared lock"""
-    with excel_lock.acquire_lock("read"):
+    with excel_lock.acquire_lock("read", shared=True):
         return await asyncio.to_thread(pd.read_excel, EXCEL_FILE_PATH)
 
 
 async def safe_write_excel(df: pd.DataFrame) -> bool:
-    """Write to Excel file with exclusive lock"""
-    try:
-        with excel_lock.acquire_lock("write"):
-            # Write to temporary file first
-            temp_path = f"{EXCEL_FILE_PATH}.tmp"
-            df.to_excel(temp_path, index=False)
-            
-            # Format headers
-            wb = load_workbook(temp_path)
-            ws = wb.active
-            from openpyxl.styles import Font
-            for cell in ws[1]:
-                cell.font = Font(bold=True)
-            wb.save(temp_path)
-            
-            # Atomic rename
-            os.rename(temp_path, EXCEL_FILE_PATH)
-            
-            return True
-            
-    except TimeoutError:
-        logger.error("Could not acquire lock for Excel write - file may be in use")
-        return False
-    except Exception as e:
-        logger.error(f"Error writing Excel with lock: {e}")
-        return False
+    """Write to Excel file with exclusive lock. Retries briefly if contention occurs."""
+    # small retry loop for transient contention
+    max_retries = 3
+    backoff = 0.5
+    attempt = 0
+    while True:
+        try:
+            with excel_lock.acquire_lock("write", shared=False):
+                # Write to temporary file first
+                temp_path = f"{EXCEL_FILE_PATH}.tmp"
+                df.to_excel(temp_path, index=False)
+                
+                # Format headers
+                wb = load_workbook(temp_path)
+                ws = wb.active
+                from openpyxl.styles import Font
+                for cell in ws[1]:
+                    cell.font = Font(bold=True)
+                wb.save(temp_path)
+                
+                # Atomic rename
+                os.rename(temp_path, EXCEL_FILE_PATH)
+                
+                return True
+        except TimeoutError:
+            logger.error("Could not acquire lock for Excel write - file may be in use")
+            # fall through to retry
+        except Exception as e:
+            logger.error(f"Error writing Excel with lock: {e}")
+            return False
+        attempt += 1
+        if attempt > max_retries:
+            return False
+        time.sleep(backoff)
 
 
 async def safe_append_row(row_data: list) -> bool:

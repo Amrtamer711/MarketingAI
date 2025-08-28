@@ -1203,8 +1203,9 @@ async def update_excel_status(task_number: int, folder: str, version: Optional[i
         
         new_status = folder_to_status.get(folder, "Unknown")
         
-        # Update Excel
-        df = pd.read_excel(EXCEL_FILE_PATH)
+        # Update Excel (use safe read)
+        from excel_lock_utils import safe_read_excel, safe_write_excel
+        df = await safe_read_excel()
         row_mask = df['Task #'] == task_number
         if not row_mask.any():
             logger.error(f"Task #{task_number} not found when updating status")
@@ -1239,17 +1240,42 @@ async def update_excel_status(task_number: int, folder: str, version: Optional[i
             history.append(history_entry)
             df.loc[row_mask, 'Version History'] = json.dumps(history)
         
-        # Use safe write to avoid concurrency issues
-        from excel_lock_utils import safe_write_excel
-        success = await safe_write_excel(df)
+        # Movement timestamp update inline (single write) using same mapping as excel_utils.update_movement_timestamp
+        try:
+            folder_to_column = {
+                "pending": "Pending Timestamps",
+                "Pending": "Pending Timestamps",
+                "Critique": "Pending Timestamps",
+                "submitted": "Submitted Timestamps", 
+                "Submitted to Sales": "Submitted Timestamps",
+                "returned": "Returned Timestamps",
+                "Returned": "Returned Timestamps",
+                "rejected": "Rejected Timestamps",
+                "Rejected": "Rejected Timestamps",
+                "Editing": "Rejected Timestamps",
+                "accepted": "Accepted Timestamps",
+                "Accepted": "Accepted Timestamps",
+                "Done": "Accepted Timestamps"
+            }
+            column_name = folder_to_column.get(folder) or folder_to_column.get(new_status)
+            if column_name:
+                if column_name not in df.columns:
+                    df[column_name] = ""
+                idx = df[row_mask].index[0]
+                current_timestamps = str(df.at[idx, column_name]) if pd.notna(df.at[idx, column_name]) else ""
+                timestamps_list = current_timestamps.split("; ") if current_timestamps else []
+                ts = datetime.now(UAE_TZ).strftime("%d-%m-%Y %H:%M:%S")
+                entry = f"v{version}:{ts}" if version is not None else ts
+                timestamps_list.append(entry)
+                df.at[idx, column_name] = "; ".join(timestamps_list)
+        except Exception as e:
+            logger.warning(f"Movement timestamp inline update skipped: {e}")
         
+        # Single write
+        success = await safe_write_excel(df)
         if not success:
             logger.error(f"Failed to update Excel status - file may be locked")
             return
-        
-        # Update movement timestamp (now with version tag)
-        from excel_utils import update_movement_timestamp
-        await update_movement_timestamp(task_number, folder, version)
         
         # If status is "Done", archive the task and remove from Excel
         if new_status == "Done":
