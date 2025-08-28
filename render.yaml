@@ -48,6 +48,8 @@ services:
     startCommand: "python assignment.py"
     envVars:
       - fromGroup: videocritique-bot
+      - key: RENDER
+        value: "true"
     disk:
       name: videocritique-data
       mountPath: /data
