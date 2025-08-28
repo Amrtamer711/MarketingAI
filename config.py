@@ -15,7 +15,8 @@ SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 # Excel file configuration
 # Use /data/ for production (absolute path), data/ for local (relative path)
-IS_PRODUCTION = os.environ.get("PORT") is not None  # Render sets PORT
+# Check for PORT (web service) or RENDER (any Render service including cron)
+IS_PRODUCTION = os.environ.get("PORT") is not None or os.environ.get("RENDER") is not None
 DATA_DIR = "/data" if IS_PRODUCTION else "data"
 EXCEL_FILE_PATH = f"{DATA_DIR}/design_requests.xlsx"
 
