@@ -95,7 +95,7 @@ class ExcelLockManager:
 
 
 # Global instance
-excel_lock = ExcelLockManager()
+excel_lock = ExcelLockManager(lock_timeout=30)
 
 
 # Enhanced Excel operations with locking
