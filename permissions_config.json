@@ -1,0 +1,76 @@
+{
+  "user_roles": {
+    "U093E4CPEE4": "super_admin",
+    "U088S1J93MW": "admin",
+    "U087WM4H6SJ": "head_of_sales"
+  },
+  "role_descriptions": {
+    "super_admin": "Full system access with all activities",
+    "admin": "Administrative access for task and user management",
+    "head_of_sales": "Can manage tasks and do final video approval",
+    "reviewer": "Can review and approve/reject videos",
+    "videographer": "Can upload videos and view their tasks",
+    "sales": "Can receive approved videos"
+  },
+  "activity_permissions": {
+    "super_admin": [
+      "upload_task",
+      "edit_task",
+      "delete_task",
+      "view_excel_db",
+      "upload_video",
+      "approve_video_reviewer",
+      "approve_video_hos",
+      "receive_video_sales",
+      "add_sales",
+      "list_sales",
+      "delete_sales",
+      "add_videographer",
+      "list_videographer",
+      "delete_videographer",
+      "add_location_mapping",
+      "list_location_mapping",
+      "delete_location_mapping",
+      "update_slack_ids"
+    ],
+    "admin": [
+      "upload_task",
+      "edit_task",
+      "delete_task",
+      "view_excel_db",
+      "add_sales",
+      "list_sales",
+      "delete_sales",
+      "add_videographer",
+      "list_videographer",
+      "delete_videographer",
+      "add_location_mapping",
+      "list_location_mapping",
+      "delete_location_mapping",
+      "update_slack_ids"
+    ],
+    "head_of_sales": [
+      "upload_task",
+      "edit_task",
+      "view_excel_db",
+      "approve_video_hos",
+      "list_sales",
+      "list_videographer",
+      "list_location_mapping"
+    ],
+    "reviewer": [
+      "view_excel_db",
+      "approve_video_reviewer",
+      "list_videographer",
+      "list_location_mapping"
+    ],
+    "videographer": [
+      "upload_video",
+      "view_excel_db"
+    ],
+    "sales": [
+      "receive_video_sales",
+      "view_excel_db"
+    ]
+  }
+}

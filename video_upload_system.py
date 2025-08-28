@@ -20,6 +20,7 @@ import requests
 from clients import slack_client
 from config import CREDENTIALS_PATH, EXCEL_FILE_PATH, UAE_TZ, SLACK_BOT_TOKEN, OPENAI_API_KEY, VIDEOGRAPHER_CONFIG_PATH
 from logger import logger
+from permissions import check_permission, SlackActivity, get_reviewer_info, get_head_of_sales_info
 
 # Dropbox folders
 DROPBOX_FOLDERS = {
@@ -493,6 +494,14 @@ def get_next_campaign_letter(existing_videos: list, reference_number: str) -> st
 async def handle_video_upload_by_task_number(channel: str, user_id: str, file_info: Dict[str, Any], task_number: int, destination_folder: str):
     """Handle video upload by task number - rename and version appropriately"""
     try:
+        # Check permissions
+        has_permission, error_msg = check_permission(user_id, SlackActivity.UPLOAD_VIDEO)
+        if not has_permission:
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text=error_msg
+            )
+            return False
         # Get task data first
         task_data = await get_task_data(task_number)
         if not task_data:
@@ -600,6 +609,14 @@ async def handle_video_upload_by_task_number(channel: str, user_id: str, file_in
 async def handle_video_upload(channel: str, user_id: str, file_info: Dict[str, Any], destination_folder: str):
     """Handle video upload from Slack to Dropbox (legacy method)"""
     try:
+        # Check permissions
+        has_permission, error_msg = check_permission(user_id, SlackActivity.UPLOAD_VIDEO)
+        if not has_permission:
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text=error_msg
+            )
+            return False
         # Get file details
         file_id = file_info.get("id")
         file_name = file_info.get("name", "video.mp4")
@@ -1317,6 +1334,14 @@ async def parse_task_number_from_message(message: str) -> Optional[int]:
 async def handle_video_upload_with_parsing(channel: str, user_id: str, file_info: Dict[str, Any], message: str):
     """Handle video upload with task number parsing from message"""
     try:
+        # Check permissions
+        has_permission, error_msg = check_permission(user_id, SlackActivity.UPLOAD_VIDEO)
+        if not has_permission:
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text=error_msg
+            )
+            return
         # Parse task number
         task_number = await parse_task_number_from_message(message)
         if not task_number:
@@ -1540,6 +1565,14 @@ async def send_video_to_reviewer(task_number: int, filename: str, dropbox_path: 
 async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url: str):
     """Handle reviewer approval - send directly to Head of Sales"""
     try:
+        # Check permissions
+        has_permission, error_msg = check_permission(user_id, SlackActivity.APPROVE_VIDEO_REVIEWER)
+        if not has_permission:
+            requests.post(response_url, json={
+                "replace_original": True,
+                "text": error_msg
+            })
+            return
         workflow = approval_workflows.get(workflow_id)
         if not workflow:
             return
@@ -1677,6 +1710,14 @@ async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url:
 async def handle_reviewer_rejection(workflow_id: str, user_id: str, response_url: str, rejection_comments: Optional[str] = None):
     """Handle reviewer rejection - send back to videographer"""
     try:
+        # Check permissions
+        has_permission, error_msg = check_permission(user_id, SlackActivity.APPROVE_VIDEO_REVIEWER)
+        if not has_permission:
+            requests.post(response_url, json={
+                "replace_original": True,
+                "text": error_msg
+            })
+            return
         workflow = approval_workflows.get(workflow_id)
         if not workflow:
             return
@@ -2141,6 +2182,14 @@ async def archive_and_remove_completed_task(task_number: int):
 async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str):
     """Handle Head of Sales approval - final acceptance"""
     try:
+        # Check permissions
+        has_permission, error_msg = check_permission(user_id, SlackActivity.APPROVE_VIDEO_HOS)
+        if not has_permission:
+            requests.post(response_url, json={
+                "replace_original": True,
+                "text": error_msg
+            })
+            return
         workflow = approval_workflows.get(workflow_id)
         if not workflow:
             return
@@ -2237,6 +2286,14 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
 async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str, rejection_comments: Optional[str] = None):
     """Handle Head of Sales rejection - move back to returned"""
     try:
+        # Check permissions
+        has_permission, error_msg = check_permission(user_id, SlackActivity.APPROVE_VIDEO_HOS)
+        if not has_permission:
+            requests.post(response_url, json={
+                "replace_original": True,
+                "text": error_msg
+            })
+            return
         workflow = approval_workflows.get(workflow_id)
         if not workflow:
             return

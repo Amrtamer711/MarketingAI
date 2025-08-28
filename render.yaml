@@ -43,7 +43,7 @@ services:
     name: task-assignment
     runtime: python
     pythonVersion: "3.11"
-    schedule: "0 9 * * *"  # Daily at 9 AM UTC (1 PM UAE)
+    schedule: "0 4 * * *"  # Daily at 4 AM UTC (8 AM UAE)
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python assignment.py"
     envVars:

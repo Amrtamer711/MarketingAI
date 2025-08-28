@@ -64,10 +64,6 @@ def should_process_event(key: str, ttl: int = _DEDUP_TTL_SECONDS) -> bool:
     _PROCESSED_EVENT_KEYS[key] = now
     return True
 
-# Track recent events per channel for quick burst counting
-_recent_event_times = defaultdict(deque)
-_BURST_WINDOW_SECONDS = 1.5
-
 # Global variable for bot user ID
 BOT_USER_ID = None
 
@@ -193,8 +189,8 @@ async def slack_events(request: Request):
                         # Debug logging
                         logger.info(f"Processing video upload - User: {user_id}, Channel: {channel}, Text: '{text}', File: {file_to_upload.get('name', 'unknown')}")
                         
-                        # Process the upload (will parse task number from message)
-                        await handle_video_upload_with_parsing(channel, user_id, file_to_upload, text)
+                        # Process the upload in background (avoid Slack timeout)
+                        asyncio.create_task(handle_video_upload_with_parsing(channel, user_id, file_to_upload, text))
                         
                     except Exception as e:
                         logger.error(f"Error handling video upload: {e}")
@@ -737,13 +733,38 @@ async def api_export_requests(filters: RequestFilter):
     try:
         df = await read_excel_async()
         
-        # Apply filters asynchronously
-        if filters.start_date:
-            df = df[df["Campaign Start Date"] >= filters.start_date]
-        if filters.end_date:
-            df = df[df["Campaign End Date"] <= filters.end_date]
-        if filters.brand:
-            df = df[df["Brand"].str.contains(filters.brand, case=False, na=False)]
+        # Apply filters asynchronously and safely
+        def parse_filter_date(value: str):
+            if not value:
+                return None
+            try:
+                return pd.to_datetime(value, errors='raise')
+            except Exception:
+                try:
+                    # Try day-first as a fallback
+                    return pd.to_datetime(value, errors='raise', dayfirst=True)
+                except Exception:
+                    return None
+        
+        # Create helper datetime columns (do not persist)
+        df['_csd'] = pd.to_datetime(df.get("Campaign Start Date"), errors='coerce', dayfirst=True)
+        df['_ced'] = pd.to_datetime(df.get("Campaign End Date"), errors='coerce', dayfirst=True)
+        
+        start_dt = parse_filter_date(filters.start_date) if getattr(filters, 'start_date', None) else None
+        end_dt = parse_filter_date(filters.end_date) if getattr(filters, 'end_date', None) else None
+        
+        if start_dt is not None:
+            df = df[df['_csd'] >= start_dt]
+        if end_dt is not None:
+            df = df[df['_ced'] <= end_dt]
+        if getattr(filters, 'brand', None):
+            df = df[df["Brand"].astype(str).str.contains(filters.brand, case=False, na=False)]
+        
+        # Drop helper columns before serializing
+        if '_csd' in df.columns:
+            df = df.drop(columns=['_csd'])
+        if '_ced' in df.columns:
+            df = df.drop(columns=['_ced'])
         
         # Convert to JSON
         filtered_requests = df.to_dict(orient="records")

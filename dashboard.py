@@ -133,12 +133,12 @@ async def get_history_count_in_period(mode: str, period: str) -> int:
     try:
         with sqlite3.connect(HISTORY_DB_PATH) as conn:
             if mode == 'year':
-                # Match any date ending with the year
+                # Match any date ending with the year (DD-MM-YYYY)
                 pattern = f"%-{period}"
-            else:  # month mode
+            else:  # month mode, period like YYYY-MM
                 year, month = period.split('-')
-                # Match DD-MM-YYYY format
-                pattern = f"%-{month:02d}-{year}"
+                # Match DD-MM-YYYY format: any day in this month/year
+                pattern = f"%-{month}-{year}"
             
             cursor = conn.execute(
                 "SELECT COUNT(*) FROM completed_tasks WHERE filming_date LIKE ?",

@@ -12,28 +12,30 @@ from history import pending_confirmations, pending_edits, pending_deletes, slash
 from management import add_videographer, remove_videographer, add_location, remove_location, list_videographers, list_locations, add_salesperson, remove_salesperson, list_salespeople, update_person_slack_ids
 import requests
 from datetime import datetime, timedelta
-from permissions import CREATE_PERMISSIONS, EDIT_PERMISSIONS, ADMIN_PERMISSIONS
+from permissions import (
+    permission_manager, check_permission, SlackActivity,
+    CREATE_PERMISSIONS, EDIT_PERMISSIONS, ADMIN_PERMISSIONS  # Keep for backward compatibility
+)
 from tools import functions
 from prompts import create_edit_system_prompt, create_design_request_system_prompt
 
 # ========== HELPER FUNCTIONS ==========
 def check_admin_permission(user_id: str) -> tuple[bool, str]:
     """Check if user has admin permissions and return appropriate message"""
-    if user_id not in ADMIN_PERMISSIONS:
-        return False, "❌ **Access Denied**: You do not have admin permissions. Only the Head of Department and Reviewer can perform this action."
-    return True, ""
+    # Use new permission system for admin activities
+    if permission_manager.is_admin(user_id):
+        return True, ""
+    return False, "❌ **Access Denied**: You do not have admin permissions. Only the Head of Department and Reviewer can perform this action."
 
 def check_create_permission(user_id: str) -> tuple[bool, str]:
     """Check if user has create permissions and return appropriate message"""
-    if user_id not in CREATE_PERMISSIONS:
-        return False, "❌ **Access Denied**: You do not have permission to create new design requests. Please contact an administrator for access."
-    return True, ""
+    # Check if user can upload tasks
+    return check_permission(user_id, SlackActivity.UPLOAD_TASK)
 
 def check_edit_permission(user_id: str) -> tuple[bool, str]:
     """Check if user has edit permissions and return appropriate message"""
-    if user_id not in EDIT_PERMISSIONS:
-        return False, "❌ **Access Denied**: You do not have permission to edit tasks. Please contact an administrator for access."
-    return True, ""
+    # Check if user can edit tasks
+    return check_permission(user_id, SlackActivity.EDIT_TASK)
 
 # ========== TOOL FUNCTIONS ==========
 async def parse_image_with_ai(file_info: Dict[str, Any], text: str = "") -> Dict[str, Any]:
@@ -1088,12 +1090,17 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                     )
                 
             elif func_name == "export_current_data":
-                answer = await export_current_data(
-                    include_history=args.get("include_history", True),
-                    format="files",
-                    channel=channel,
-                    user_id=user_id
-                )
+                # Check permissions for viewing excel/db
+                has_permission, error_msg = check_permission(user_id, SlackActivity.VIEW_EXCEL_DB)
+                if not has_permission:
+                    answer = error_msg
+                else:
+                    answer = await export_current_data(
+                        include_history=args.get("include_history", True),
+                        format="files",
+                        channel=channel,
+                        user_id=user_id
+                    )
             elif func_name == "edit_task":
                 # Check permissions
                 has_permission, error_msg = check_edit_permission(user_id)
@@ -1132,8 +1139,17 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                         answer = f"I couldn't find Task #{task_number}. Please check the task number and try again, or use /recent_requests to see available tasks."
             
             elif func_name == "manage_videographer":
-                # Check admin permissions
-                has_permission, error_msg = check_admin_permission(user_id)
+                # Check permissions for videographer management
+                action = args.get("action", "list")
+                if action == "list":
+                    has_permission, error_msg = check_permission(user_id, SlackActivity.LIST_VIDEOGRAPHER)
+                elif action == "add":
+                    has_permission, error_msg = check_permission(user_id, SlackActivity.ADD_VIDEOGRAPHER)
+                elif action == "remove":
+                    has_permission, error_msg = check_permission(user_id, SlackActivity.DELETE_VIDEOGRAPHER)
+                else:
+                    has_permission, error_msg = False, "Unknown action"
+                
                 if not has_permission:
                     answer = error_msg
                 else:
@@ -1189,8 +1205,17 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                             answer = f"❌ Error listing videographers: {result['error']}"
             
             elif func_name == "manage_location":
-                # Check admin permissions
-                has_permission, error_msg = check_admin_permission(user_id)
+                # Check permissions for location management
+                action = args.get("action", "list")
+                if action == "list":
+                    has_permission, error_msg = check_permission(user_id, SlackActivity.LIST_LOCATION_MAPPING)
+                elif action == "add":
+                    has_permission, error_msg = check_permission(user_id, SlackActivity.ADD_LOCATION_MAPPING)
+                elif action == "remove":
+                    has_permission, error_msg = check_permission(user_id, SlackActivity.DELETE_LOCATION_MAPPING)
+                else:
+                    has_permission, error_msg = False, "Unknown action"
+                
                 if not has_permission:
                     answer = error_msg
                 else:
@@ -1241,8 +1266,17 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                             answer = f"❌ Error listing locations: {result['error']}"
             
             elif func_name == "manage_salesperson":
-                # Check admin permissions
-                has_permission, error_msg = check_admin_permission(user_id)
+                # Check permissions for salesperson management
+                action = args.get("action", "list")
+                if action == "list":
+                    has_permission, error_msg = check_permission(user_id, SlackActivity.LIST_SALES)
+                elif action == "add":
+                    has_permission, error_msg = check_permission(user_id, SlackActivity.ADD_SALES)
+                elif action == "remove":
+                    has_permission, error_msg = check_permission(user_id, SlackActivity.DELETE_SALES)
+                else:
+                    has_permission, error_msg = False, "Unknown action"
+                
                 if not has_permission:
                     answer = error_msg
                 else:
@@ -1296,8 +1330,8 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                             answer = f"❌ Error listing salespeople: {result['error']}"
             
             elif func_name == "update_person_slack_ids":
-                # Check admin permissions
-                has_permission, error_msg = check_admin_permission(user_id)
+                # Check permissions for updating Slack IDs
+                has_permission, error_msg = check_permission(user_id, SlackActivity.UPDATE_SLACK_IDS)
                 if not has_permission:
                     answer = error_msg
                 else:
@@ -1335,8 +1369,8 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                             answer = f"❌ Failed to update Slack IDs: {result['error']}"
             
             elif func_name == "delete_task":
-                # Check permissions (using edit permissions for delete)
-                has_permission, error_msg = check_edit_permission(user_id)
+                # Check permissions for deleting tasks
+                has_permission, error_msg = check_permission(user_id, SlackActivity.DELETE_TASK)
                 if not has_permission:
                     answer = error_msg
                 else:
