@@ -130,174 +130,100 @@ async def read_excel_async() -> pd.DataFrame:
         await initialize_excel()
     return await asyncio.to_thread(pd.read_excel, EXCEL_FILE_PATH)
 
-async def export_current_data(include_history: bool = True, format: str = "summary") -> str:
-    """Export all current data from Excel and optionally from history database"""
+async def export_current_data(include_history: bool = True, format: str = "files", channel: str = None, user_id: str = None) -> str:
+    """Export actual Excel and database files to Slack"""
     try:
         import sqlite3
         from config import HISTORY_DB_PATH
+        from clients import slack_client
         
-        # Get Excel data (live tasks)
-        df = await read_excel_async()
+        if not channel or not user_id:
+            return "❌ Channel and user information required to send files"
         
-        response = "📊 **Current System Data Export**\n\n"
-        response += "=" * 50 + "\n\n"
+        # Prepare response message
+        response = "📊 **Exporting System Data Files...**\n\n"
         
-        # 1. LIVE TASKS FROM EXCEL
-        response += f"**📋 LIVE TASKS (Excel) - {len(df)} tasks**\n\n"
+        files_sent = []
         
-        if len(df) > 0:
-            # Sort by task number descending
-            df_sorted = df.sort_values('Task #', ascending=False)
-            
-            for _, row in df_sorted.iterrows():
-                task_num = row.get('Task #', 'N/A')
-                status = row.get('Status', 'N/A')
+        # 1. Send Excel file
+        try:
+            if os.path.exists(EXCEL_FILE_PATH):
+                # Get basic stats
+                df = await read_excel_async()
+                live_count = len(df)
                 
-                if format == "summary":
-                    # Summary format - key fields only
-                    response += f"**Task #{task_num}** - {status}\n"
-                    response += f"• Brand: {row.get('Brand', 'N/A')}\n"
-                    response += f"• Campaign: {row.get('Campaign Start Date', 'N/A')} to {row.get('Campaign End Date', 'N/A')}\n"
-                    response += f"• Reference: {row.get('Reference Number', 'N/A')}\n"
-                    response += f"• Location: {row.get('Location', 'N/A')}\n"
-                    response += f"• Sales Person: {row.get('Sales Person', 'N/A')}\n"
-                    if pd.notna(row.get('Videographer')) and row.get('Videographer'):
-                        response += f"• Videographer: {row.get('Videographer')}\n"
-                    if pd.notna(row.get('Current Version')) and row.get('Current Version'):
-                        response += f"• Current Version: {row.get('Current Version')}\n"
+                # Upload Excel file to Slack
+                with open(EXCEL_FILE_PATH, 'rb') as f:
+                    result = await slack_client.files_upload_v2(
+                        channel=channel,
+                        file=f,
+                        filename=f"design_requests_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        title="Current Excel Data (Live Tasks)",
+                        initial_comment=f"📋 **Excel file with {live_count} live tasks**"
+                    )
+                
+                if result.get('ok'):
+                    files_sent.append("Excel")
+                    response += f"✅ Excel file sent ({live_count} live tasks)\n"
                 else:
-                    # Detailed format - all fields
-                    response += f"**Task #{task_num}** - {status}\n"
-                    for col in df.columns:
-                        val = row.get(col)
-                        if pd.notna(val) and str(val).strip():
-                            response += f"• {col}: {val}\n"
+                    response += f"❌ Failed to send Excel file: {result.get('error', 'Unknown error')}\n"
+            else:
+                response += "⚠️ Excel file not found\n"
                 
-                response += "\n"
-        else:
-            response += "_No live tasks currently in Excel_\n\n"
+        except Exception as e:
+            logger.error(f"Error sending Excel file: {e}")
+            response += f"❌ Error sending Excel file: {str(e)}\n"
         
-        # 2. COMPLETED TASKS FROM HISTORY DATABASE
+        # 2. Send History Database file if requested
         if include_history:
-            response += "-" * 50 + "\n\n"
-            response += "**✅ COMPLETED TASKS (History DB)**\n\n"
-            
             try:
-                with sqlite3.connect(HISTORY_DB_PATH) as conn:
-                    # Get count
-                    cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
-                    history_count = cursor.fetchone()[0]
-                    response += f"_Total completed tasks: {history_count}_\n\n"
+                if os.path.exists(HISTORY_DB_PATH):
+                    # Get basic stats
+                    with sqlite3.connect(HISTORY_DB_PATH) as conn:
+                        cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
+                        history_count = cursor.fetchone()[0]
                     
-                    if history_count > 0:
-                        # Get recent completed tasks
-                        if format == "summary":
-                            query = """
-                                SELECT task_number, brand, campaign_start_date, campaign_end_date,
-                                       reference_number, location, sales_person, videographer,
-                                       status, completed_at
-                                FROM completed_tasks
-                                ORDER BY task_number DESC
-                                LIMIT 20
-                            """
-                        else:
-                            query = """
-                                SELECT *
-                                FROM completed_tasks
-                                ORDER BY task_number DESC
-                                LIMIT 20
-                            """
-                        
-                        cursor = conn.execute(query)
-                        columns = [desc[0] for desc in cursor.description]
-                        
-                        rows = cursor.fetchall()
-                        response += f"_Showing most recent {len(rows)} completed tasks:_\n\n"
-                        
-                        for row in rows:
-                            task_dict = dict(zip(columns, row))
-                            task_num = task_dict.get('task_number', 'N/A')
-                            
-                            if format == "summary":
-                                response += f"**Task #{task_num}** - Completed\n"
-                                response += f"• Brand: {task_dict.get('brand', 'N/A')}\n"
-                                response += f"• Campaign: {task_dict.get('campaign_start_date', 'N/A')} to {task_dict.get('campaign_end_date', 'N/A')}\n"
-                                response += f"• Reference: {task_dict.get('reference_number', 'N/A')}\n"
-                                response += f"• Location: {task_dict.get('location', 'N/A')}\n"
-                                response += f"• Sales Person: {task_dict.get('sales_person', 'N/A')}\n"
-                                response += f"• Videographer: {task_dict.get('videographer', 'N/A')}\n"
-                                response += f"• Completed: {task_dict.get('completed_at', 'N/A')}\n"
-                            else:
-                                response += f"**Task #{task_num}** - Completed\n"
-                                for col, val in task_dict.items():
-                                    if val and str(val).strip() and col != 'id':
-                                        response += f"• {col}: {val}\n"
-                            
-                            response += "\n"
+                    # Upload database file to Slack
+                    with open(HISTORY_DB_PATH, 'rb') as f:
+                        result = await slack_client.files_upload_v2(
+                            channel=channel,
+                            file=f,
+                            filename=f"history_logs_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.db",
+                            title="History Database (Completed Tasks)",
+                            initial_comment=f"✅ **History database with {history_count} completed tasks**"
+                        )
+                    
+                    if result.get('ok'):
+                        files_sent.append("History DB")
+                        response += f"✅ History database sent ({history_count} completed tasks)\n"
                     else:
-                        response += "_No completed tasks in history database_\n\n"
-                        
-            except Exception as e:
-                logger.error(f"Error reading history database: {e}")
-                response += f"_Error reading history database: {str(e)}_\n\n"
-        
-        # 3. SUMMARY STATISTICS
-        response += "=" * 50 + "\n"
-        response += "**📈 SUMMARY STATISTICS**\n\n"
-        
-        # Status breakdown from Excel
-        if len(df) > 0:
-            status_counts = df['Status'].value_counts()
-            response += "**Live Task Status Breakdown:**\n"
-            for status, count in status_counts.items():
-                response += f"• {status}: {count}\n"
-            response += "\n"
-            
-            # Videographer workload
-            videographer_counts = df[df['Videographer'].notna()]['Videographer'].value_counts()
-            if len(videographer_counts) > 0:
-                response += "**Videographer Assignments:**\n"
-                for videographer, count in videographer_counts.items():
-                    if videographer:
-                        response += f"• {videographer}: {count} tasks\n"
-                response += "\n"
-        
-        # History stats
-        if include_history:
-            try:
-                with sqlite3.connect(HISTORY_DB_PATH) as conn:
-                    cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
-                    total_completed = cursor.fetchone()[0]
+                        response += f"❌ Failed to send history database: {result.get('error', 'Unknown error')}\n"
+                else:
+                    response += "⚠️ History database not found\n"
                     
-                    # Get completion by month
-                    cursor = conn.execute("""
-                        SELECT 
-                            substr(completed_at, 4, 7) as month,
-                            COUNT(*) as count
-                        FROM completed_tasks
-                        WHERE completed_at IS NOT NULL
-                        GROUP BY substr(completed_at, 4, 7)
-                        ORDER BY substr(completed_at, 7, 4) DESC, substr(completed_at, 4, 2) DESC
-                        LIMIT 6
-                    """)
-                    
-                    monthly_stats = cursor.fetchall()
-                    if monthly_stats:
-                        response += "**Recent Monthly Completions:**\n"
-                        for month, count in monthly_stats:
-                            response += f"• {month}: {count} completed\n"
-                        response += "\n"
-                        
             except Exception as e:
-                logger.warning(f"Error getting history stats: {e}")
+                logger.error(f"Error sending history database: {e}")
+                response += f"❌ Error sending history database: {str(e)}\n"
         
-        response += f"\n_Export generated at {datetime.now(UAE_TZ).strftime('%d-%m-%Y %H:%M:%S')} UAE Time_"
+        # 3. Summary
+        response += "\n" + "=" * 50 + "\n"
+        
+        if files_sent:
+            response += f"\n✅ **Successfully exported {', '.join(files_sent)}**\n\n"
+            response += "**How to view the files:**\n"
+            response += "• **Excel (.xlsx)** - Open with Microsoft Excel, Google Sheets, or any spreadsheet app\n"
+            response += "• **Database (.db)** - Open with SQLite browser or any SQLite viewer\n"
+            response += "\n_Files contain sensitive business data - handle with care_"
+        else:
+            response += "\n❌ **No files were exported successfully**"
+        
+        response += f"\n\n_Export requested at {datetime.now(UAE_TZ).strftime('%d-%m-%Y %H:%M:%S')} UAE Time_"
         
         return response
         
     except Exception as e:
-        logger.error(f"Error exporting data: {e}")
-        return f"❌ Error exporting data: {str(e)}"
+        logger.error(f"Error exporting data files: {e}")
+        return f"❌ Error exporting data files: {str(e)}"
 
 async def get_task_by_number(task_number: int) -> Dict[str, Any]:
     """Get a specific task by task number"""

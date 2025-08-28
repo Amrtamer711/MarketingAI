@@ -20,12 +20,11 @@ functions = [
     {
         "type": "function",
         "name": "export_current_data",
-        "description": "Export all current data including live tasks from Excel and completed tasks from history database. Shows the complete state of the system.",
+        "description": "Send the actual Excel file and history database files to the user via Slack. This exports the raw data files for download and external viewing.",
         "parameters": {
             "type": "object",
             "properties": {
-                "include_history": {"type": "boolean", "description": "Include completed tasks from history database", "default": True},
-                "format": {"type": "string", "enum": ["summary", "detailed"], "description": "Output format - summary shows key fields, detailed shows all fields", "default": "summary"}
+                "include_history": {"type": "boolean", "description": "Include the history database file with completed tasks", "default": True}
             }
         }
     },

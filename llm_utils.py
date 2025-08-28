@@ -1090,7 +1090,9 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
             elif func_name == "export_current_data":
                 answer = await export_current_data(
                     include_history=args.get("include_history", True),
-                    format=args.get("format", "summary")
+                    format="files",
+                    channel=channel,
+                    user_id=user_id
                 )
             elif func_name == "edit_task":
                 # Check permissions
