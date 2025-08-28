@@ -44,10 +44,6 @@ async def save_to_excel(data: Dict[str, Any]) -> Dict[str, Any]:
         if not Path(EXCEL_FILE_PATH).exists():
             await initialize_excel()
         
-        # Load workbook in thread pool
-        wb = await asyncio.to_thread(load_workbook, EXCEL_FILE_PATH)
-        ws = wb.active
-        
         # Get next task number
         task_number = await get_next_task_number()
         
@@ -76,21 +72,7 @@ async def save_to_excel(data: Dict[str, Any]) -> Dict[str, Any]:
             except:
                 pass
         
-        # Ensure new columns exist in case of older files
-        existing_headers = [c.value for c in ws[1]]
-        new_headers = ["Current Version", "Version History"]
-        if any(h not in existing_headers for h in new_headers):
-            for h in new_headers:
-                if h not in existing_headers:
-                    ws.cell(row=1, column=len(existing_headers) + 1, value=h)
-                    existing_headers.append(h)
-            # Also ensure timestamp columns exist
-            for h in ["Pending Timestamps", "Submitted Timestamps", "Returned Timestamps", "Rejected Timestamps", "Accepted Timestamps"]:
-                if h not in existing_headers:
-                    ws.cell(row=1, column=len(existing_headers) + 1, value=h)
-                    existing_headers.append(h)
-        
-        # Replace underscores with dashes in all fields
+        # Build row data (safe for locking append)
         row_data = [
             task_number,
             datetime.now(UAE_TZ).strftime("%d-%m-%Y %H:%M:%S"),
@@ -103,10 +85,10 @@ async def save_to_excel(data: Dict[str, Any]) -> Dict[str, Any]:
             data.get("submitted_by", "").replace("_", "-"),
             "Not assigned yet",  # Default status
             filming_date,
-            "",  # Videographer - will be filled during assignment
-            "",  # Video Filename - will be filled during upload/assignment
+            "",  # Videographer
+            "",  # Video Filename
             "",  # Current Version
-            "[]",  # Version History (JSON array)
+            "[]",  # Version History
             "",  # Pending Timestamps
             "",  # Submitted Timestamps
             "",  # Returned Timestamps
@@ -114,10 +96,11 @@ async def save_to_excel(data: Dict[str, Any]) -> Dict[str, Any]:
             ""   # Accepted Timestamps
         ]
         
-        ws.append(row_data)
-        
-        # Save asynchronously
-        await asyncio.to_thread(wb.save, EXCEL_FILE_PATH)
+        # Append using locking helpers
+        from excel_lock_utils import safe_append_row
+        success = await safe_append_row(row_data)
+        if not success:
+            return {"success": False, "task_number": None}
         
         return {"success": True, "task_number": task_number}
     except Exception as e:
@@ -125,10 +108,11 @@ async def save_to_excel(data: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "task_number": None}
 
 async def read_excel_async() -> pd.DataFrame:
-    """Read data from Excel file"""
+    """Read data from Excel file (with shared lock)"""
     if not Path(EXCEL_FILE_PATH).exists():
         await initialize_excel()
-    return await asyncio.to_thread(pd.read_excel, EXCEL_FILE_PATH)
+    from excel_lock_utils import safe_read_excel
+    return await safe_read_excel()
 
 async def export_current_data(include_history: bool = True, format: str = "files", channel: str = None, user_id: str = None) -> str:
     """Export actual Excel and database files to Slack"""
