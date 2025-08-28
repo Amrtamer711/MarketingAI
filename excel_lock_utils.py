@@ -101,86 +101,37 @@ excel_lock = ExcelLockManager()
 # Enhanced Excel operations with locking
 async def safe_read_excel() -> pd.DataFrame:
     """Read Excel file with shared lock"""
-    is_render = os.environ.get("RENDER") == "true"
-    
-    if is_render:
-        # On Render, read without locking
+    with excel_lock.acquire_lock("read"):
         return await asyncio.to_thread(pd.read_excel, EXCEL_FILE_PATH)
-    else:
-        # Local environment - use locking
-        with excel_lock.acquire_lock("read"):
-            return await asyncio.to_thread(pd.read_excel, EXCEL_FILE_PATH)
 
 
 async def safe_write_excel(df: pd.DataFrame) -> bool:
     """Write to Excel file with exclusive lock"""
-    # Check if we're on Render - use simpler approach without fcntl
-    is_render = os.environ.get("RENDER") == "true"
-    
-    if is_render:
-        # On Render, use a simpler approach without file locking
-        try:
+    try:
+        with excel_lock.acquire_lock("write"):
             # Write to temporary file first
             temp_path = f"{EXCEL_FILE_PATH}.tmp"
-            await asyncio.to_thread(df.to_excel, temp_path, index=False)
+            df.to_excel(temp_path, index=False)
             
             # Format headers
-            wb = await asyncio.to_thread(load_workbook, temp_path)
+            wb = load_workbook(temp_path)
             ws = wb.active
             from openpyxl.styles import Font
             for cell in ws[1]:
                 cell.font = Font(bold=True)
-            await asyncio.to_thread(wb.save, temp_path)
-            wb.close()
+            wb.save(temp_path)
             
             # Atomic rename
             os.rename(temp_path, EXCEL_FILE_PATH)
             
-            logger.debug("Excel write completed on Render without locking")
             return True
             
-        except Exception as e:
-            logger.error(f"Error writing Excel on Render: {e}")
-            logger.error(f"Excel path: {EXCEL_FILE_PATH}")
-            logger.error(f"Temp path: {temp_path}")
-            logger.error(f"Current working dir: {os.getcwd()}")
-            logger.error(f"Excel file exists: {os.path.exists(EXCEL_FILE_PATH)}")
-            logger.error(f"Excel file permissions: {oct(os.stat(EXCEL_FILE_PATH).st_mode) if os.path.exists(EXCEL_FILE_PATH) else 'N/A'}")
-            logger.error(f"Directory permissions: {oct(os.stat(os.path.dirname(EXCEL_FILE_PATH)).st_mode)}")
-            # Clean up temp file if it exists
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-            return False
-    else:
-        # Local environment - use full locking
-        try:
-            with excel_lock.acquire_lock("write"):
-                # Write to temporary file first
-                temp_path = f"{EXCEL_FILE_PATH}.tmp"
-                df.to_excel(temp_path, index=False)
-                
-                # Format headers
-                wb = load_workbook(temp_path)
-                ws = wb.active
-                from openpyxl.styles import Font
-                for cell in ws[1]:
-                    cell.font = Font(bold=True)
-                wb.save(temp_path)
-                
-                # Atomic rename
-                os.rename(temp_path, EXCEL_FILE_PATH)
-                
-                return True
-                
-        except TimeoutError:
-            logger.error("Could not acquire lock for Excel write - file may be in use")
-            return False
-        except Exception as e:
-            logger.error(f"Error writing Excel with lock: {e}")
-            return False
+    except TimeoutError:
+        logger.error("Could not acquire lock for Excel write - file may be in use")
+        return False
+    except Exception as e:
+        logger.error(f"Error writing Excel with lock: {e}")
+        return False
 
 
 async def safe_append_row(row_data: list) -> bool:
