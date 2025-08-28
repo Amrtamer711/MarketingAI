@@ -787,6 +787,28 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now(UAE_TZ).isoformat()}
 
+@api.post("/internal/run-assignment")
+async def run_assignment_internal():
+    """Internal endpoint to run assignment script - called by cron job"""
+    try:
+        # Import and run the assignment function
+        from assignment import check_and_assign_tasks
+        
+        logger.info("Running assignment check via internal API")
+        assignments = check_and_assign_tasks()
+        
+        return JSONResponse({
+            "success": True,
+            "assignments_made": len(assignments),
+            "timestamp": datetime.now(UAE_TZ).isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error running assignment: {e}")
+        return JSONResponse(
+            {"success": False, "error": str(e)}, 
+            status_code=500
+        )
+
 @api.get("/dashboard")
 async def dashboard():
     html = """

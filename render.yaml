@@ -1,12 +1,15 @@
-services:
-  # Main web service
-  - type: web
-    name: videocritique-bot
-    runtime: python
-    pythonVersion: "3.10"
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python startup.py && uvicorn app:api --host 0.0.0.0 --port $PORT"
+envVarGroups:
+  - name: videocritique-shared
     envVars:
+      # Python runtime version
+      - key: PYTHON_VERSION
+        value: "3.10.13"
+
+      # Sensitive API keys and secrets (set in dashboard)
+      - key: DROPBOX_API_KEY
+        sync: false
+      - key: SLACK_APP_TOKEN
+        sync: false
       - key: SLACK_BOT_TOKEN
         sync: false
       - key: SLACK_SIGNING_SECRET
@@ -25,32 +28,70 @@ services:
         sync: false
       - key: HEAD_OF_DEPT_EMAIL
         sync: false
-      - key: BOARD_NAME
-        value: "Marketing Sites Videos"
-      - key: BOT_USER_ID
-        sync: false
       - key: HEAD_OF_SALES_EMAIL
         sync: false
       - key: REDIS_URL
         sync: false
+
+      # Non-sensitive constants (safe inline)
+      - key: BOARD_NAME
+        value: "Marketing Sites Videos"
+      - key: ENV
+        value: "test"
+      - key: GOOGLE_JSON_PATH
+        value: "./routes-key.json"
+      - key: SHARED_DRIVE_ID
+        value: "0APQeWpj0OKLtUk9PVA"
+      - key: HISTORY_SHEET_ID
+        value: "1EPxGvtPWU3N6RLrqyMzv0eeiBITDIFZhzoex_39kYrY"
+      - key: BOT_USER_ID
+        sync: false
+      - key: RENDER
+        value: "true"
+
+services:
+  # Main web service
+  - type: web
+    name: videocritique-bot
+    runtime: python
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: python startup.py && uvicorn app:api --host 0.0.0.0 --port $PORT
+    envVars:
+      - fromGroup: videocritique-shared
     disk:
+      # Reuse your existing 5 GB disk (must match exact name in dashboard)
       name: videocritique-data
       mountPath: /data
-      sizeGB: 1
+      sizeGB: 5
 
-  # Daily task assignment cron job
+  # Cron job for daily task assignment
   - type: cron
     name: task-assignment
     runtime: python
-    pythonVersion: "3.10"
-    schedule: "0 4 * * 1-5"  # Monday-Friday at 4 AM UTC (8 AM UAE)
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python assignment.py"
+    region: singapore
+    schedule: "0 4 * * 1-5"   # Mon–Fri 04:00 UTC (08:00 UAE)
+    buildCommand: pip install requests
+    startCommand: |
+      python -c "
+      import requests
+      import json
+      import sys
+      
+      url = 'https://videocritique-bot.onrender.com/internal/run-assignment'
+      print(f'Calling assignment endpoint: {url}')
+      
+      try:
+          response = requests.post(url, timeout=300)
+          response.raise_for_status()
+          result = response.json()
+          print(f'Success! Assignments made: {result.get(\"assignments_made\", 0)}')
+          print(f'Response: {json.dumps(result, indent=2)}')
+      except requests.exceptions.RequestException as e:
+          print(f'Error calling assignment endpoint: {e}')
+          if hasattr(e, 'response') and e.response is not None:
+              print(f'Response body: {e.response.text}')
+          sys.exit(1)
+      "
     envVars:
-      - fromGroup: videocritique-bot
-      - key: RENDER
-        value: "true"
-    disk:
-      name: videocritique-data
-      mountPath: /data
-      sizeGB: 1
+      - fromGroup: videocritique-shared

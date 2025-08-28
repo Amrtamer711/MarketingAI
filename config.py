@@ -13,12 +13,28 @@ UAE_TZ = pytz.timezone('Asia/Dubai')
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-# Excel file configuration
-# Use /data/ for production (absolute path), data/ for local (relative path)
-# Check for PORT (web service) or RENDER (any Render service including cron)
-IS_PRODUCTION = os.environ.get("PORT") is not None or os.environ.get("RENDER") is not None
+# Production detection - single source of truth
+# We're in production if ANY of these are true:
+# 1. Running on Render (has RENDER env var)
+# 2. Has PORT env var (web services)
+# 3. Explicitly set PRODUCTION=true
+# 4. /data directory exists (Render disk mount)
+IS_PRODUCTION = any([
+    os.environ.get("RENDER") == "true",
+    os.environ.get("PORT") is not None,
+    os.environ.get("PRODUCTION") == "true",
+    os.path.exists("/data")
+])
+
+# Data directory configuration
 DATA_DIR = "/data" if IS_PRODUCTION else "data"
 EXCEL_FILE_PATH = f"{DATA_DIR}/design_requests.xlsx"
+
+# Log the environment for debugging
+if IS_PRODUCTION:
+    print(f"🚀 Running in PRODUCTION mode - using {DATA_DIR}/")
+else:
+    print(f"💻 Running in LOCAL mode - using {DATA_DIR}/")
 
 # Trello configuration
 TRELLO_API_KEY = os.environ.get("TRELLO_API_KEY")
@@ -27,8 +43,11 @@ BOARD_NAME = "Amr - Tracker"
 
 # Environment no longer needed - always use local Excel/DB
 
-# Default history DB path
+# All file paths use DATA_DIR
 HISTORY_DB_PATH = f"{DATA_DIR}/history_logs.db"
+VIDEOGRAPHER_CONFIG_PATH = f"{DATA_DIR}/videographer_config.json"
+CREDENTIALS_PATH = Path(f"{DATA_DIR}/dropbox_creds.json")
+PERMISSIONS_CONFIG_PATH = f"{DATA_DIR}/permissions_config.json"
 
 # Email configuration
 EMAIL_SENDER = os.getenv("EMAIL_SENDER", "your-email@example.com")
@@ -38,12 +57,6 @@ APP_PSWD = os.getenv("APP_PSWD", "your-app-password")  # Keep for backward compa
 REVIEWER_EMAIL = os.getenv("REVIEWER_EMAIL", "reviewer@example.com")
 HEAD_OF_DEPT_EMAIL = os.getenv("HEAD_OF_DEPT_EMAIL", "hod@example.com")
 HEAD_OF_SALES_EMAIL = os.getenv("HEAD_OF_SALES_EMAIL", "hos@example.com")
-
-# Dropbox credentials path
-CREDENTIALS_PATH = Path(f"{DATA_DIR}/dropbox_creds.json")
-
-# Videographer config path
-VIDEOGRAPHER_CONFIG_PATH = f"{DATA_DIR}/videographer_config.json"
 
 # Note: DROPBOX_FOLDERS is defined in video_upload_system.py as a dict mapping folder names to paths
 

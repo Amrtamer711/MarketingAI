@@ -139,10 +139,10 @@ def load_config():
 
 def load_permission_config() -> Dict[str, str]:
     """Load permission config from file if exists"""
-    permission_config_path = "permissions_config.json"
-    if os.path.exists(permission_config_path):
+    from config import PERMISSIONS_CONFIG_PATH
+    if os.path.exists(PERMISSIONS_CONFIG_PATH):
         try:
-            with open(permission_config_path, 'r') as f:
+            with open(PERMISSIONS_CONFIG_PATH, 'r') as f:
                 config = json.load(f)
                 return config.get("user_roles", {})
         except:
@@ -306,13 +306,13 @@ class PermissionManager:
     
     def save_to_permission_config(self):
         """Save current user roles to permission config"""
-        permission_config_path = "permissions_config.json"
+        from config import PERMISSIONS_CONFIG_PATH
         config = {}
         
         # Load existing config if exists
-        if os.path.exists(permission_config_path):
+        if os.path.exists(PERMISSIONS_CONFIG_PATH):
             try:
-                with open(permission_config_path, 'r') as f:
+                with open(PERMISSIONS_CONFIG_PATH, 'r') as f:
                     config = json.load(f)
             except:
                 config = {}
@@ -322,7 +322,7 @@ class PermissionManager:
         
         # Save config
         try:
-            with open(permission_config_path, 'w') as f:
+            with open(PERMISSIONS_CONFIG_PATH, 'w') as f:
                 json.dump(config, f, indent=2)
         except Exception as e:
             print(f"Error saving permission config: {e}")
