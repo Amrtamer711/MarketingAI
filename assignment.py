@@ -1,16 +1,21 @@
 import pandas as pd
 from datetime import datetime
-from config import BOARD_NAME, EXCEL_FILE_PATH
+from config import BOARD_NAME
 from trello_utils import get_board_id_by_name, create_card_on_board, count_working_days, calculate_filming_date, will_be_available_by_date, get_leave_dates, LOCATION_TO_VIDEOGRAPHER, get_best_videographer_for_balancing   
+from db_utils import select_all_tasks as db_select_all_tasks
+from db_utils import update_task_by_number as db_update_task_by_number
 
 
 # ========== MAIN CAMPAIGN PROCESSING ==========
 def check_and_assign_tasks():
     """Check for unassigned campaigns and create Trello tasks"""
     try:
-        # Read the Excel file
-        df = pd.read_excel(EXCEL_FILE_PATH)
-        print(f"📊 Found {len(df)} total design requests")
+        # Read live tasks from DB
+        rows = db_select_all_tasks()
+        df = pd.DataFrame(rows)
+        if 'task_number' in df.columns:
+            df.rename(columns={'task_number': 'Task #'}, inplace=True)
+        print(f"📊 Found {len(df)} total design requests (DB)")
         
         # Convert columns to string type to avoid dtype warnings
         df['Videographer'] = df['Videographer'].astype('object')
@@ -134,9 +139,11 @@ def check_and_assign_tasks():
                             from trello_utils import create_checklist_with_dates
                             create_checklist_with_dates(card['id'], video_date)
                         
-                        # Update status and videographer in DataFrame
-                        df.at[idx, 'Status'] = f'Assigned to {assigned_person}'
-                        df.at[idx, 'Videographer'] = assigned_person
+                        # Update status and videographer in DB
+                        db_update_task_by_number(int(task_number), {
+                            'Status': f'Assigned to {assigned_person}',
+                            'Videographer': assigned_person
+                        })
                         
                         assignments_made.append({
                             'brand': row['Brand'],
@@ -145,7 +152,7 @@ def check_and_assign_tasks():
                             'assigned_to': assigned_person,
                             'video_date': video_date,
                             'trello_url': card.get('shortUrl', 'N/A'),
-                            'reassigned': primary_person and assigned_person != primary_person
+                            'reassigned': bool(primary_person and assigned_person != primary_person)
                         })
                         
                         print(f"✅ Assigned {row['Brand']} ({row['Reference Number']}) to {assigned_person}")
@@ -158,17 +165,7 @@ def check_and_assign_tasks():
                 print(f"❌ Error processing row {idx}: {e}")
                 continue
         
-        # Save updated Excel file if assignments were made
-        if assignments_made:
-            # Use safe write to avoid concurrency issues
-            from excel_lock_utils import safe_write_excel
-            import asyncio
-            success = asyncio.run(safe_write_excel(df))
-            if success:
-                print(f"\n✅ Updated Excel file with {len(assignments_made)} new assignments")
-            else:
-                print(f"\n❌ Failed to update Excel file - file may be locked")
-        else:
+        if not assignments_made:
             print("\n📝 No new assignments made")
         
         return assignments_made

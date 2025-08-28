@@ -18,7 +18,7 @@ import pandas as pd
 import requests
 
 from clients import slack_client
-from config import CREDENTIALS_PATH, EXCEL_FILE_PATH, UAE_TZ, SLACK_BOT_TOKEN, OPENAI_API_KEY, VIDEOGRAPHER_CONFIG_PATH
+from config import CREDENTIALS_PATH, UAE_TZ, SLACK_BOT_TOKEN, OPENAI_API_KEY, VIDEOGRAPHER_CONFIG_PATH
 from logger import logger
 from simple_permissions import check_permission as simple_check_permission
 from utils import load_videographer_config
@@ -127,19 +127,13 @@ Return ONLY the category name, nothing else."""
         return "Other"
 
 async def get_rejection_history(task_number: int, include_current: bool = False) -> List[Dict[str, Any]]:
-    """Get complete rejection/return history for a task from Excel version history"""
+    """Get complete rejection/return history for a task from DB version history"""
     try:
-        df = pd.read_excel(EXCEL_FILE_PATH)
-        task_row = df[df['Task #'] == task_number]
-        
-        if task_row.empty:
+        from db_utils import get_task_by_number as db_get
+        row = db_get_task = await asyncio.to_thread(lambda: db_get(task_number))
+        if not row:
             return []
-            
-        # Get version history
-        version_history_json = task_row.iloc[0].get('Version History', '[]')
-        if pd.isna(version_history_json):
-            version_history_json = '[]'
-            
+        version_history_json = row.get('Version History', '[]') or '[]'
         version_history = json.loads(version_history_json)
         
         # Get all rejections and returns
@@ -1103,22 +1097,9 @@ def extract_task_number(filename: str) -> Optional[int]:
 async def get_task_data(task_number: int) -> Optional[Dict]:
     """Get task data from Excel"""
     try:
-        df = pd.read_excel(EXCEL_FILE_PATH)
-        task_row = df[df['Task #'] == task_number]
-        
-        if not task_row.empty:
-            task_data = task_row.iloc[0].to_dict()
-            
-            # Format dates for display (convert from pandas datetime to DD-MM-YYYY string)
-            date_fields = ['Campaign Start Date', 'Campaign End Date', 'Filming Date', 'Timestamp']
-            for field in date_fields:
-                if field in task_data and pd.notna(task_data[field]):
-                    if hasattr(task_data[field], 'strftime'):
-                        task_data[field] = task_data[field].strftime('%d-%m-%Y')
-            
-            return task_data
-        
-        return None
+        from excel_utils import get_task_by_number as db_get_task
+        task_data = await db_get_task(task_number)
+        return task_data
     except Exception as e:
         logger.error(f"Error getting task data: {e}")
         return None
@@ -1279,7 +1260,8 @@ async def update_excel_status(task_number: int, folder: str, version: Optional[i
         
         # If status is "Done", archive the task and remove from Excel
         if new_status == "Done":
-            await archive_and_remove_completed_task(task_number)
+            from db_utils import archive_task
+            archive_task(task_number)
             logger.info(f"✅ Task #{task_number} moved to history DB and removed from Excel")
         else:
             logger.info(f"✅ Updated Task #{task_number} status to: {new_status}")
@@ -1288,33 +1270,8 @@ async def update_excel_status(task_number: int, folder: str, version: Optional[i
         logger.error(f"Error updating Excel: {e}")
 
 async def check_videos_in_excel(reference_number: str) -> list:
-    """Check for videos with same reference number in Excel file"""
-    existing_videos = []
-    try:
-        df = pd.read_excel(EXCEL_FILE_PATH)
-        # Check for any status that indicates video exists
-        video_statuses = ['Raw', 'Critique', 'Editing', 
-                         'Submitted to Sales', 'Done', 'Returned']
-        
-        # Filter rows with same reference number and video status
-        matching_rows = df[
-            (df['Reference Number'].str.replace(' ', '') == reference_number) & 
-            (df['Status'].isin(video_statuses))
-        ]
-        
-        for _, row in matching_rows.iterrows():
-            # Try to extract letter from status or comments
-            # This is a simplified version - you might need to enhance based on your data
-            existing_videos.append({
-                'filename': f"Task_{row['Task #']}_video",
-                'folder': 'excel',
-                'path': 'excel_record'
-            })
-            
-    except Exception as e:
-        logger.error(f"Error checking Excel for videos: {e}")
-    
-    return existing_videos
+    """Deprecated Excel check; DB now prevents duplicates via unique reference."""
+    return []
 
 async def update_trello_status(task_number: int, folder: str):
     """Update Trello card based on video status"""
@@ -2172,60 +2129,29 @@ async def handle_sales_rejection(workflow_id: str, user_id: str, response_url: s
         logger.error(f"Error handling sales rejection: {e}")
 
 async def update_task_status(task_number: int, status: str):
-    """Update task status in Excel"""
+    """Update task status in DB and stamp movement timestamp"""
     try:
-        df = pd.read_excel(EXCEL_FILE_PATH)
-        df.loc[df['Task #'] == task_number, 'Status'] = status
-        df.to_excel(EXCEL_FILE_PATH, index=False)
-        logger.info(f"Updated Task #{task_number} status to: {status}")
-        
-        # Map status to folder for timestamp tracking
-        status_to_folder = {
-            "Critique": "pending",
-            "Editing": "rejected", 
-            "Done": "accepted",
-            "Returned": "returned",
-            "Submitted to Sales": "submitted"
-        }
-        
-        folder = status_to_folder.get(status)
-        if folder:
-            from excel_utils import update_movement_timestamp
-            await update_movement_timestamp(task_number, folder)
-            
+        from db_utils import update_task_by_number as db_update
+        ok = await asyncio.to_thread(lambda: db_update(task_number, {'Status': status}))
+        if ok:
+            logger.info(f"Updated Task #{task_number} status to: {status}")
+        else:
+            logger.error(f"DB update failed for Task #{task_number}")
     except Exception as e:
         logger.error(f"Error updating task status: {e}")
 
 async def archive_and_remove_completed_task(task_number: int):
-    """Archive completed task to historical DB, remove from Excel and Trello"""
+    """Archive completed task to historical DB and archive Trello card"""
     try:
-        # Get task data from Excel
-        df = pd.read_excel(EXCEL_FILE_PATH)
-        task_row = df[df['Task #'] == task_number]
-        
-        if not task_row.empty:
-            # Archive to historical database
-            from excel_utils import archive_completed_task
-            archive_completed_task(task_row.iloc[0].to_dict())
-            logger.info(f"Archived Task #{task_number} to historical database")
-            
-            # Remove from Excel using safe write
-            df_updated = df[df['Task #'] != task_number]
-            from excel_lock_utils import safe_write_excel
-            success = await safe_write_excel(df_updated)
-            
-            if not success:
-                logger.error(f"Failed to remove Task #{task_number} from Excel - file may be locked")
-                return
-            logger.info(f"Removed Task #{task_number} from Excel")
-            
-            # Remove from Trello
+        from db_utils import archive_task
+        ok = archive_task(task_number)
+        if ok:
+            logger.info(f"✅ Task #{task_number} moved to history DB")
             from trello_utils import get_trello_card_by_task_number, archive_trello_card
             card = await get_trello_card_by_task_number(task_number)
             if card:
                 archive_trello_card(card['id'])
                 logger.info(f"Archived Trello card for Task #{task_number}")
-            
     except Exception as e:
         logger.error(f"Error archiving completed task: {e}")
 
