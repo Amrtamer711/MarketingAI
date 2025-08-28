@@ -891,14 +891,22 @@ async def dashboard():
         }
 
         async function loadData() {
-          const period = currentPeriod();
-          const res = await fetch(`/api/dashboard?mode=${mode}&period=${encodeURIComponent(period)}`);
-          const data = await res.json();
-          setSummaryVg(data.summary_videographers || {});
-          renderPie(data.pie);
-          renderSummary(data.summary);
-          renderReviewer(data.reviewer);
-          renderVideographers(data.videographers);
+          try {
+            const period = currentPeriod();
+            const res = await fetch(`/api/dashboard?mode=${mode}&period=${encodeURIComponent(period)}`);
+            if (!res.ok) {
+              throw new Error(`HTTP error! status: ${res.status}`);
+            }
+            const data = await res.json();
+            setSummaryVg(data.summary_videographers || {});
+            renderPie(data.pie || { completed: 0, not_completed: 0 });
+            renderSummary(data.summary || {});
+            renderReviewer(data.reviewer || {});
+            renderVideographers(data.videographers || []);
+          } catch (error) {
+            console.error('Error loading dashboard data:', error);
+            alert('Error loading dashboard data. Please check the console.');
+          }
         }
 
         let pieChart;
@@ -1185,17 +1193,21 @@ async def api_dashboard(mode: str = "month", period: str = ""):
             return {
                 "period": period,
                 "mode": mode,
-                "stats": {
-                    "total_requests": 0,
-                    "assigned": 0,
-                    "uploads": 0,
-                    "rejected": 0,
-                    "submitted": 0,
-                    "returned": 0,
-                    "accepted": 0
+                "pie": {
+                    "completed": 0,
+                    "not_completed": 0
                 },
-                "videographer_stats": [],
-                "task_details": []
+                "summary": {
+                    "total": 0,
+                    "assigned": 0,
+                    "pending": 0,
+                    "review": 0,
+                    "done": 0,
+                    "completion_rate": "0%"
+                },
+                "reviewer": {},
+                "videographers": [],
+                "summary_videographers": {}
             }
         
         # Calculate metrics based on version history
