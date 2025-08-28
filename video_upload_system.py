@@ -20,7 +20,31 @@ import requests
 from clients import slack_client
 from config import CREDENTIALS_PATH, EXCEL_FILE_PATH, UAE_TZ, SLACK_BOT_TOKEN, OPENAI_API_KEY, VIDEOGRAPHER_CONFIG_PATH
 from logger import logger
-from permissions import check_permission, SlackActivity, get_reviewer_info, get_head_of_sales_info
+from simple_permissions import check_permission as simple_check_permission
+from utils import load_videographer_config
+
+# Helper functions to get reviewer and head of sales info
+def get_reviewer_info() -> Dict[str, str]:
+    """Get reviewer info including user ID and channel ID"""
+    config = load_videographer_config()
+    reviewer = config.get("reviewer", {})
+    return {
+        "user_id": reviewer.get("slack_user_id", ""),
+        "channel_id": reviewer.get("slack_channel_id", ""),
+        "name": reviewer.get("name", "Reviewer"),
+        "email": reviewer.get("email", "")
+    }
+
+def get_head_of_sales_info() -> Dict[str, str]:
+    """Get head of sales info"""
+    config = load_videographer_config()
+    hos = config.get("head_of_sales", {})
+    return {
+        "user_id": hos.get("slack_user_id", ""),
+        "channel_id": hos.get("slack_channel_id", ""),
+        "name": hos.get("name", "Head of Sales"),
+        "email": hos.get("email", "")
+    }
 
 # Dropbox folders
 DROPBOX_FOLDERS = {
@@ -495,7 +519,7 @@ async def handle_video_upload_by_task_number(channel: str, user_id: str, file_in
     """Handle video upload by task number - rename and version appropriately"""
     try:
         # Check permissions
-        has_permission, error_msg = check_permission(user_id, SlackActivity.UPLOAD_VIDEO)
+        has_permission, error_msg = simple_check_permission(user_id, "upload_video")
         if not has_permission:
             await slack_client.chat_postMessage(
                 channel=channel,
@@ -610,7 +634,7 @@ async def handle_video_upload(channel: str, user_id: str, file_info: Dict[str, A
     """Handle video upload from Slack to Dropbox (legacy method)"""
     try:
         # Check permissions
-        has_permission, error_msg = check_permission(user_id, SlackActivity.UPLOAD_VIDEO)
+        has_permission, error_msg = simple_check_permission(user_id, "upload_video")
         if not has_permission:
             await slack_client.chat_postMessage(
                 channel=channel,
@@ -1335,7 +1359,7 @@ async def handle_video_upload_with_parsing(channel: str, user_id: str, file_info
     """Handle video upload with task number parsing from message"""
     try:
         # Check permissions
-        has_permission, error_msg = check_permission(user_id, SlackActivity.UPLOAD_VIDEO)
+        has_permission, error_msg = simple_check_permission(user_id, "upload_video")
         if not has_permission:
             await slack_client.chat_postMessage(
                 channel=channel,
@@ -1566,7 +1590,7 @@ async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url:
     """Handle reviewer approval - send directly to Head of Sales"""
     try:
         # Check permissions
-        has_permission, error_msg = check_permission(user_id, SlackActivity.APPROVE_VIDEO_REVIEWER)
+        has_permission, error_msg = simple_check_permission(user_id, "approve_video_reviewer")
         if not has_permission:
             requests.post(response_url, json={
                 "replace_original": True,
@@ -1711,7 +1735,7 @@ async def handle_reviewer_rejection(workflow_id: str, user_id: str, response_url
     """Handle reviewer rejection - send back to videographer"""
     try:
         # Check permissions
-        has_permission, error_msg = check_permission(user_id, SlackActivity.APPROVE_VIDEO_REVIEWER)
+        has_permission, error_msg = simple_check_permission(user_id, "approve_video_reviewer")
         if not has_permission:
             requests.post(response_url, json={
                 "replace_original": True,
@@ -2183,7 +2207,7 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
     """Handle Head of Sales approval - final acceptance"""
     try:
         # Check permissions
-        has_permission, error_msg = check_permission(user_id, SlackActivity.APPROVE_VIDEO_HOS)
+        has_permission, error_msg = simple_check_permission(user_id, "approve_video_hos")
         if not has_permission:
             requests.post(response_url, json={
                 "replace_original": True,
@@ -2287,7 +2311,7 @@ async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str
     """Handle Head of Sales rejection - move back to returned"""
     try:
         # Check permissions
-        has_permission, error_msg = check_permission(user_id, SlackActivity.APPROVE_VIDEO_HOS)
+        has_permission, error_msg = simple_check_permission(user_id, "approve_video_hos")
         if not has_permission:
             requests.post(response_url, json={
                 "replace_original": True,

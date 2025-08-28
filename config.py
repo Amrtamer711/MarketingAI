@@ -47,7 +47,6 @@ BOARD_NAME = "Amr - Tracker"
 HISTORY_DB_PATH = f"{DATA_DIR}/history_logs.db"
 VIDEOGRAPHER_CONFIG_PATH = f"{DATA_DIR}/videographer_config.json"
 CREDENTIALS_PATH = Path(f"{DATA_DIR}/dropbox_creds.json")
-PERMISSIONS_CONFIG_PATH = f"{DATA_DIR}/permissions_config.json"
 
 # Email configuration
 EMAIL_SENDER = os.getenv("EMAIL_SENDER", "your-email@example.com")
