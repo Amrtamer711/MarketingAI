@@ -130,22 +130,174 @@ async def read_excel_async() -> pd.DataFrame:
         await initialize_excel()
     return await asyncio.to_thread(pd.read_excel, EXCEL_FILE_PATH)
 
-async def get_recent_requests(limit: int = 5):
-    """Get recent design requests"""
+async def export_current_data(include_history: bool = True, format: str = "summary") -> str:
+    """Export all current data from Excel and optionally from history database"""
     try:
+        import sqlite3
+        from config import HISTORY_DB_PATH
+        
+        # Get Excel data (live tasks)
         df = await read_excel_async()
-        recent = df.tail(limit)
         
-        if len(recent) == 0:
-            return "No requests found yet."
+        response = "📊 **Current System Data Export**\n\n"
+        response += "=" * 50 + "\n\n"
         
-        response = f"📋 Recent {len(recent)} requests:\n\n"
-        for _, row in recent.iterrows():
-            response += f"• {row.get('Brand', 'N/A')} - {row.get('Campaign Start Date', 'N/A')} to {row.get('Campaign End Date', 'N/A')} ({row.get('Reference Number', 'N/A')})\n"
+        # 1. LIVE TASKS FROM EXCEL
+        response += f"**📋 LIVE TASKS (Excel) - {len(df)} tasks**\n\n"
+        
+        if len(df) > 0:
+            # Sort by task number descending
+            df_sorted = df.sort_values('Task #', ascending=False)
+            
+            for _, row in df_sorted.iterrows():
+                task_num = row.get('Task #', 'N/A')
+                status = row.get('Status', 'N/A')
+                
+                if format == "summary":
+                    # Summary format - key fields only
+                    response += f"**Task #{task_num}** - {status}\n"
+                    response += f"• Brand: {row.get('Brand', 'N/A')}\n"
+                    response += f"• Campaign: {row.get('Campaign Start Date', 'N/A')} to {row.get('Campaign End Date', 'N/A')}\n"
+                    response += f"• Reference: {row.get('Reference Number', 'N/A')}\n"
+                    response += f"• Location: {row.get('Location', 'N/A')}\n"
+                    response += f"• Sales Person: {row.get('Sales Person', 'N/A')}\n"
+                    if pd.notna(row.get('Videographer')) and row.get('Videographer'):
+                        response += f"• Videographer: {row.get('Videographer')}\n"
+                    if pd.notna(row.get('Current Version')) and row.get('Current Version'):
+                        response += f"• Current Version: {row.get('Current Version')}\n"
+                else:
+                    # Detailed format - all fields
+                    response += f"**Task #{task_num}** - {status}\n"
+                    for col in df.columns:
+                        val = row.get(col)
+                        if pd.notna(val) and str(val).strip():
+                            response += f"• {col}: {val}\n"
+                
+                response += "\n"
+        else:
+            response += "_No live tasks currently in Excel_\n\n"
+        
+        # 2. COMPLETED TASKS FROM HISTORY DATABASE
+        if include_history:
+            response += "-" * 50 + "\n\n"
+            response += "**✅ COMPLETED TASKS (History DB)**\n\n"
+            
+            try:
+                with sqlite3.connect(HISTORY_DB_PATH) as conn:
+                    # Get count
+                    cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
+                    history_count = cursor.fetchone()[0]
+                    response += f"_Total completed tasks: {history_count}_\n\n"
+                    
+                    if history_count > 0:
+                        # Get recent completed tasks
+                        if format == "summary":
+                            query = """
+                                SELECT task_number, brand, campaign_start_date, campaign_end_date,
+                                       reference_number, location, sales_person, videographer,
+                                       status, completed_at
+                                FROM completed_tasks
+                                ORDER BY task_number DESC
+                                LIMIT 20
+                            """
+                        else:
+                            query = """
+                                SELECT *
+                                FROM completed_tasks
+                                ORDER BY task_number DESC
+                                LIMIT 20
+                            """
+                        
+                        cursor = conn.execute(query)
+                        columns = [desc[0] for desc in cursor.description]
+                        
+                        rows = cursor.fetchall()
+                        response += f"_Showing most recent {len(rows)} completed tasks:_\n\n"
+                        
+                        for row in rows:
+                            task_dict = dict(zip(columns, row))
+                            task_num = task_dict.get('task_number', 'N/A')
+                            
+                            if format == "summary":
+                                response += f"**Task #{task_num}** - Completed\n"
+                                response += f"• Brand: {task_dict.get('brand', 'N/A')}\n"
+                                response += f"• Campaign: {task_dict.get('campaign_start_date', 'N/A')} to {task_dict.get('campaign_end_date', 'N/A')}\n"
+                                response += f"• Reference: {task_dict.get('reference_number', 'N/A')}\n"
+                                response += f"• Location: {task_dict.get('location', 'N/A')}\n"
+                                response += f"• Sales Person: {task_dict.get('sales_person', 'N/A')}\n"
+                                response += f"• Videographer: {task_dict.get('videographer', 'N/A')}\n"
+                                response += f"• Completed: {task_dict.get('completed_at', 'N/A')}\n"
+                            else:
+                                response += f"**Task #{task_num}** - Completed\n"
+                                for col, val in task_dict.items():
+                                    if val and str(val).strip() and col != 'id':
+                                        response += f"• {col}: {val}\n"
+                            
+                            response += "\n"
+                    else:
+                        response += "_No completed tasks in history database_\n\n"
+                        
+            except Exception as e:
+                logger.error(f"Error reading history database: {e}")
+                response += f"_Error reading history database: {str(e)}_\n\n"
+        
+        # 3. SUMMARY STATISTICS
+        response += "=" * 50 + "\n"
+        response += "**📈 SUMMARY STATISTICS**\n\n"
+        
+        # Status breakdown from Excel
+        if len(df) > 0:
+            status_counts = df['Status'].value_counts()
+            response += "**Live Task Status Breakdown:**\n"
+            for status, count in status_counts.items():
+                response += f"• {status}: {count}\n"
+            response += "\n"
+            
+            # Videographer workload
+            videographer_counts = df[df['Videographer'].notna()]['Videographer'].value_counts()
+            if len(videographer_counts) > 0:
+                response += "**Videographer Assignments:**\n"
+                for videographer, count in videographer_counts.items():
+                    if videographer:
+                        response += f"• {videographer}: {count} tasks\n"
+                response += "\n"
+        
+        # History stats
+        if include_history:
+            try:
+                with sqlite3.connect(HISTORY_DB_PATH) as conn:
+                    cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
+                    total_completed = cursor.fetchone()[0]
+                    
+                    # Get completion by month
+                    cursor = conn.execute("""
+                        SELECT 
+                            substr(completed_at, 4, 7) as month,
+                            COUNT(*) as count
+                        FROM completed_tasks
+                        WHERE completed_at IS NOT NULL
+                        GROUP BY substr(completed_at, 4, 7)
+                        ORDER BY substr(completed_at, 7, 4) DESC, substr(completed_at, 4, 2) DESC
+                        LIMIT 6
+                    """)
+                    
+                    monthly_stats = cursor.fetchall()
+                    if monthly_stats:
+                        response += "**Recent Monthly Completions:**\n"
+                        for month, count in monthly_stats:
+                            response += f"• {month}: {count} completed\n"
+                        response += "\n"
+                        
+            except Exception as e:
+                logger.warning(f"Error getting history stats: {e}")
+        
+        response += f"\n_Export generated at {datetime.now(UAE_TZ).strftime('%d-%m-%Y %H:%M:%S')} UAE Time_"
         
         return response
+        
     except Exception as e:
-        return f"Error retrieving requests: {str(e)}"
+        logger.error(f"Error exporting data: {e}")
+        return f"❌ Error exporting data: {str(e)}"
 
 async def get_task_by_number(task_number: int) -> Dict[str, Any]:
     """Get a specific task by task number"""
@@ -471,15 +623,13 @@ async def update_movement_timestamp(task_number: int, folder: str, version: Opti
                 df['Current Version'] = ""
             df.at[idx, 'Current Version'] = version
         
-        # Save Excel file
-        df.to_excel(EXCEL_FILE_PATH, index=False)
+        # Use safe write to avoid concurrency issues
+        from excel_lock_utils import safe_write_excel
+        success = await safe_write_excel(df)
         
-        # Format headers
-        wb = load_workbook(EXCEL_FILE_PATH)
-        ws = wb.active
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-        wb.save(EXCEL_FILE_PATH)
+        if not success:
+            logger.error(f"Failed to update movement timestamp - file may be locked")
+            return
         
         logger.info(f"✅ Updated movement timestamp for Task #{task_number} in {folder} (v{version if version is not None else '-'})")
     except Exception as e:
@@ -505,22 +655,24 @@ async def delete_task_by_number(task_number: int) -> Dict[str, Any]:
         # Remove from DataFrame
         df = df.drop(task_index)
         
-        # Save back to Excel
-        df.to_excel(EXCEL_FILE_PATH, index=False)
+        # Use safe write to avoid concurrency issues
+        from excel_lock_utils import safe_write_excel
+        success = await safe_write_excel(df)
         
-        # Format headers
-        wb = load_workbook(EXCEL_FILE_PATH)
-        ws = wb.active
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-        wb.save(EXCEL_FILE_PATH)
+        if not success:
+            logger.error(f"Failed to delete task - file may be locked")
+            return {"success": False, "error": "Excel file is locked"}
         
         # If task was assigned, archive/remove the Trello card
         if str(task_data.get('Status', '')).startswith('Assigned to'):
-            from trello_utils import archive_trello_card
-            archived = await archive_trello_card(task_number)
-            if not archived:
-                logger.warning(f"Could not archive Trello card for task {task_number}")
+            from trello_utils import archive_trello_card, get_trello_card_by_task_number
+            card = await get_trello_card_by_task_number(task_number)
+            if card:
+                archived = archive_trello_card(card['id'])
+                if not archived:
+                    logger.warning(f"Could not archive Trello card for task {task_number}")
+            else:
+                logger.warning(f"Could not find Trello card for task {task_number}")
         
         return {"success": True, "task_data": task_data}
         
@@ -607,15 +759,13 @@ async def update_task_by_number(task_number: int, updates: Dict[str, Any], curre
         # Update timestamp
         df.at[idx, 'Timestamp'] = datetime.now(UAE_TZ).strftime('%d-%m-%Y %H:%M:%S')
         
-        # Save back to Excel
-        df.to_excel(EXCEL_FILE_PATH, index=False)
+        # Use safe write to avoid concurrency issues
+        from excel_lock_utils import safe_write_excel
+        success = await safe_write_excel(df)
         
-        # Format headers
-        wb = load_workbook(EXCEL_FILE_PATH)
-        ws = wb.active
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-        wb.save(EXCEL_FILE_PATH)
+        if not success:
+            logger.error(f"Failed to update task - file may be locked")
+            return {"success": False, "error": "Excel file is locked"}
         
         # If any task just moved to Done/Accepted, archive it, then remove from live sheet (optional)
         try:

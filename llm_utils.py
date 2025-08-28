@@ -7,7 +7,7 @@ import json
 import asyncio
 from PIL import Image
 from utils import _load_mapping_config, _format_sales_people_hint, _format_locations_hint, _format_videographers_hint, append_to_history, markdown_to_slack
-from excel_utils import save_to_excel, check_duplicate_reference, get_task_by_number, get_recent_requests, update_task_by_number, delete_task_by_number
+from excel_utils import save_to_excel, check_duplicate_reference, get_task_by_number, export_current_data, update_task_by_number, delete_task_by_number
 from history import pending_confirmations, pending_edits, pending_deletes, slash_command_responses, user_history
 from management import add_videographer, remove_videographer, add_location, remove_location, list_videographers, list_locations, add_salesperson, remove_salesperson, list_salespeople, update_person_slack_ids
 import requests
@@ -1087,9 +1087,10 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                         is_duplicate=False  # Don't check for duplicates until confirm
                     )
                 
-            elif func_name == "get_recent_bookings":
-                answer = await get_recent_requests(
-                    limit=args.get("limit", 5)
+            elif func_name == "export_current_data":
+                answer = await export_current_data(
+                    include_history=args.get("include_history", True),
+                    format=args.get("format", "summary")
                 )
             elif func_name == "edit_task":
                 # Check permissions

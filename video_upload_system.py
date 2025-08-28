@@ -1198,7 +1198,13 @@ async def update_excel_status(task_number: int, folder: str, version: Optional[i
             history.append(history_entry)
             df.loc[row_mask, 'Version History'] = json.dumps(history)
         
-        df.to_excel(EXCEL_FILE_PATH, index=False)
+        # Use safe write to avoid concurrency issues
+        from excel_lock_utils import safe_write_excel
+        success = await safe_write_excel(df)
+        
+        if not success:
+            logger.error(f"Failed to update Excel status - file may be locked")
+            return
         
         # Update movement timestamp (now with version tag)
         from excel_utils import update_movement_timestamp
@@ -2112,18 +2118,14 @@ async def archive_and_remove_completed_task(task_number: int):
             archive_completed_task(task_row.iloc[0].to_dict())
             logger.info(f"Archived Task #{task_number} to historical database")
             
-            # Remove from Excel
+            # Remove from Excel using safe write
             df_updated = df[df['Task #'] != task_number]
-            df_updated.to_excel(EXCEL_FILE_PATH, index=False)
+            from excel_lock_utils import safe_write_excel
+            success = await safe_write_excel(df_updated)
             
-            # Format headers
-            from openpyxl import load_workbook
-            from openpyxl.styles import Font
-            wb = load_workbook(EXCEL_FILE_PATH)
-            ws = wb.active
-            for cell in ws[1]:
-                cell.font = Font(bold=True)
-            wb.save(EXCEL_FILE_PATH)
+            if not success:
+                logger.error(f"Failed to remove Task #{task_number} from Excel - file may be locked")
+                return
             logger.info(f"Removed Task #{task_number} from Excel")
             
             # Remove from Trello

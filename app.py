@@ -1215,7 +1215,36 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         
         # Filter by filming date - tasks scheduled for this period show all their versions
         scope = df[df['__filming_date'].apply(in_period)].copy()
-        logger.info(f"Tasks in scope (filtered by filming date): {len(scope)}")
+        logger.info(f"Tasks in scope from Excel (filtered by filming date): {len(scope)}")
+        
+        # Also get completed tasks from history database that match the period
+        history_completed_in_period = 0
+        try:
+            with sqlite3.connect(HISTORY_DB_PATH) as conn:
+                # Query completed tasks with filming dates in the current period
+                if mode == 'year':
+                    year = int(period or datetime.now(UAE_TZ).strftime('%Y'))
+                    query = """
+                        SELECT COUNT(*) FROM completed_tasks 
+                        WHERE filming_date LIKE ?
+                    """
+                    cursor = conn.execute(query, (f"%-{year}",))
+                else:
+                    # Month mode
+                    p = period or datetime.now(UAE_TZ).strftime('%Y-%m')
+                    year, month = map(int, p.split('-'))
+                    # Match DD-MM-YYYY format
+                    pattern = f"%-{month:02d}-{year}"
+                    query = """
+                        SELECT COUNT(*) FROM completed_tasks 
+                        WHERE filming_date LIKE ?
+                    """
+                    cursor = conn.execute(query, (pattern,))
+                
+                history_completed_in_period = cursor.fetchone()[0]
+                logger.info(f"Completed tasks from history DB in period: {history_completed_in_period}")
+        except Exception as e:
+            logger.warning(f"Error querying history database: {e}")
         
         # Handle empty data
         if len(scope) == 0 or len(df) == 0:
@@ -1240,8 +1269,8 @@ async def api_dashboard(mode: str = "month", period: str = ""):
             }
         
         # Calculate metrics based on version history
-        total = int(scope.shape[0])
-        assigned = int((scope['Videographer'].fillna('') != '').sum())
+        total = int(scope.shape[0]) + history_completed_in_period
+        assigned = int((scope['Videographer'].fillna('') != '').sum()) + history_completed_in_period  # History tasks were all assigned
         
         logger.info(f"\n=== OVERALL METRICS CALCULATION ===")
         logger.info(f"Total tasks in scope: {total}")
@@ -1341,8 +1370,9 @@ async def api_dashboard(mode: str = "month", period: str = ""):
             except:
                 pass
         
-        not_completed = max(total - completed_tasks, 0)
-        completed = completed_tasks
+        # Add historical completed tasks to the count
+        completed = completed_tasks + history_completed_in_period
+        not_completed = max(total - completed, 0)
         
         # Reviewer stats - calculate from videos that moved from pending to another status
         deltas = []

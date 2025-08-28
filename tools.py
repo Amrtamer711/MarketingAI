@@ -19,12 +19,13 @@ functions = [
     },
     {
         "type": "function",
-        "name": "get_recent_bookings",
-        "description": "Retrieve recent design requests.",
+        "name": "export_current_data",
+        "description": "Export all current data including live tasks from Excel and completed tasks from history database. Shows the complete state of the system.",
         "parameters": {
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "description": "Number of recent bookings to retrieve", "default": 5}
+                "include_history": {"type": "boolean", "description": "Include completed tasks from history database", "default": True},
+                "format": {"type": "string", "enum": ["summary", "detailed"], "description": "Output format - summary shows key fields, detailed shows all fields", "default": "summary"}
             }
         }
     },

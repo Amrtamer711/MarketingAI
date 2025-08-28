@@ -160,8 +160,14 @@ def check_and_assign_tasks():
         
         # Save updated Excel file if assignments were made
         if assignments_made:
-            df.to_excel(EXCEL_FILE_PATH, index=False)
-            print(f"\n✅ Updated Excel file with {len(assignments_made)} new assignments")
+            # Use safe write to avoid concurrency issues
+            from excel_lock_utils import safe_write_excel
+            import asyncio
+            success = asyncio.run(safe_write_excel(df))
+            if success:
+                print(f"\n✅ Updated Excel file with {len(assignments_made)} new assignments")
+            else:
+                print(f"\n❌ Failed to update Excel file - file may be locked")
         else:
             print("\n📝 No new assignments made")
         
