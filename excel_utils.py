@@ -175,46 +175,79 @@ async def get_task_by_number(task_number: int) -> Dict[str, Any]:
 
 async def get_next_task_number() -> int:
     """Get the next available task number from both Excel and historical DB"""
+    logger.info("\n=== GENERATING NEW TASK NUMBER ===")
     max_excel_task = 0
     max_db_task = 0
+    excel_tasks = []
     
     try:
         # Get max from Excel
         df = await read_excel_async()
+        logger.info(f"Excel file has {len(df)} rows")
         if len(df) > 0:
+            # Get all task numbers for debugging
+            excel_tasks = df['Task #'].dropna().tolist()
+            logger.info(f"Task numbers in Excel: {sorted([int(t) for t in excel_tasks if str(t).isdigit()])[:10]}...")
             excel_max = df['Task #'].max()
             if pd.notna(excel_max):
                 max_excel_task = int(excel_max)
+            logger.info(f"Maximum task number in Excel: {max_excel_task}")
+        else:
+            logger.info("Excel file is empty")
     except Exception as e:
         logger.warning(f"Error reading Excel for task number: {e}")
     
     try:
         # Get max from SQLite history database
         with sqlite3.connect(HISTORY_DB_PATH) as conn:
+            # Get count and some samples
+            cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
+            count = cursor.fetchone()[0]
+            logger.info(f"History database has {count} completed tasks")
+            
+            # Get sample of task numbers
+            cursor = conn.execute("""
+                SELECT task_number FROM completed_tasks 
+                WHERE task_number IS NOT NULL 
+                ORDER BY task_number DESC LIMIT 10
+            """)
+            db_sample = [row[0] for row in cursor.fetchall()]
+            if db_sample:
+                logger.info(f"Recent task numbers in history DB: {db_sample}")
+            
+            # Get max
             cursor = conn.execute("""
                 SELECT MAX(task_number) FROM completed_tasks
             """)
             db_max = cursor.fetchone()[0]
             if db_max is not None:
                 max_db_task = int(db_max)
+            logger.info(f"Maximum task number in history DB: {max_db_task}")
     except Exception as e:
         logger.warning(f"Error reading history for task number: {e}")
     
     # Return the highest task number + 1
     max_task = max(max_excel_task, max_db_task)
-    return max_task + 1 if max_task > 0 else 1
+    next_task = max_task + 1 if max_task > 0 else 1
+    logger.info(f"Next task number will be: {next_task} (Excel max: {max_excel_task}, DB max: {max_db_task})")
+    logger.info("=== END TASK NUMBER GENERATION ===\n")
+    return next_task
 
 async def check_duplicate_reference(reference_number: str) -> Dict[str, Any]:
     """Check if reference number already exists in Excel or historical DB"""
+    logger.info(f"\n=== CHECKING DUPLICATE REFERENCE: {reference_number} ===")
     try:
         # Clean reference number for comparison
         clean_ref = reference_number.replace("_", "-")
+        logger.info(f"Cleaned reference: {clean_ref}")
         
         # Check in active Excel first
         df = await read_excel_async()
+        logger.info(f"Checking {len(df)} rows in Excel")
         existing = df[df['Reference Number'] == clean_ref]
         
         if len(existing) > 0:
+            logger.info(f"Found duplicate in Excel: Task #{existing.iloc[0]['Task #']}")
             # Get details of existing entry
             existing_entry = existing.iloc[0]
             
@@ -246,8 +279,14 @@ async def check_duplicate_reference(reference_number: str) -> Dict[str, Any]:
             return result
         
         # Check in historical database
+        logger.info("No duplicate found in Excel, checking history database...")
         try:
             with sqlite3.connect(HISTORY_DB_PATH) as conn:
+                # First count how many completed tasks we have
+                cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
+                total_history = cursor.fetchone()[0]
+                logger.info(f"Checking {total_history} completed tasks in history")
+                
                 cursor = conn.execute("""
                     SELECT task_number, brand, campaign_start_date, campaign_end_date, 
                            location, submitted_by, completed_at
@@ -257,6 +296,7 @@ async def check_duplicate_reference(reference_number: str) -> Dict[str, Any]:
                 
                 row = cursor.fetchone()
                 if row:
+                    logger.info(f"Found duplicate in history: Task #{row[0]} (Completed: {row[6]})")
                     return {
                         "is_duplicate": True,
                         "existing_entry": {
@@ -274,6 +314,8 @@ async def check_duplicate_reference(reference_number: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Error checking historical data for duplicate: {e}")
         
+        logger.info(f"No duplicate found for reference: {clean_ref}")
+        logger.info("=== END DUPLICATE CHECK ===\n")
         return {"is_duplicate": False}
         
     except Exception as e:

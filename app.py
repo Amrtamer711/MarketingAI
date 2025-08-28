@@ -1111,6 +1111,8 @@ async def dashboard():
 
 @api.get("/api/dashboard")
 async def api_dashboard(mode: str = "month", period: str = ""):
+    import sqlite3
+    from config import HISTORY_DB_PATH
     try:
         # Period parsing helpers
         def in_period(d) -> bool:
@@ -1169,9 +1171,36 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         
         df['__filming_date'] = df['Filming Date'].apply(parse_date)
         
-        logger.info(f"\n=== FILTERING BY FILMING DATE ===")
+        logger.info(f"\n=== DASHBOARD DATA ANALYSIS ===")
         logger.info(f"Total rows in Excel: {len(df)}")
         logger.info(f"Period mode: {mode}, Period value: {period}")
+        
+        # Log column information
+        logger.info(f"Available columns: {list(df.columns)}")
+        
+        # Check history database
+        try:
+            with sqlite3.connect(HISTORY_DB_PATH) as conn:
+                cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
+                history_count = cursor.fetchone()[0]
+                logger.info(f"History database contains: {history_count} completed tasks")
+                
+                # Sample some data
+                cursor = conn.execute("""
+                    SELECT task_number, brand, status, completed_at 
+                    FROM completed_tasks 
+                    ORDER BY task_number DESC LIMIT 5
+                """)
+                history_sample = cursor.fetchall()
+                if history_sample:
+                    logger.info("Recent completed tasks:")
+                    for row in history_sample:
+                        logger.info(f"  Task #{row[0]}: {row[1]} - {row[2]} - Completed: {row[3]}")
+        except Exception as e:
+            logger.warning(f"Error reading history database: {e}")
+        
+        logger.info(f"\n=== FILTERING BY FILMING DATE ===")
+        logger.info(f"Period filter: {mode}={period}")
         
         # Debug filming dates
         for _, row in df.head(10).iterrows():
