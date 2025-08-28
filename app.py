@@ -1247,8 +1247,8 @@ async def api_dashboard(mode: str = "month", period: str = ""):
             logger.warning(f"Error querying history database: {e}")
         
         # Handle empty data
-        if len(scope) == 0 or len(df) == 0:
-            return {
+        if len(scope) == 0:
+            return JSONResponse({
                 "period": period,
                 "mode": mode,
                 "pie": {
@@ -1259,14 +1259,23 @@ async def api_dashboard(mode: str = "month", period: str = ""):
                     "total": 0,
                     "assigned": 0,
                     "pending": 0,
-                    "review": 0,
-                    "done": 0,
-                    "completion_rate": "0%"
+                    "rejected": 0,
+                    "submitted_to_sales": 0,
+                    "returned": 0,
+                    "uploads": 0,
+                    "accepted_videos": 0,
+                    "accepted_pct": 0,
+                    "rejected_pct": 0
                 },
-                "reviewer": {},
-                "videographers": [],
+                "reviewer": {
+                    "avg_response_hours": 0,
+                    "avg_response_display": "0 hrs",
+                    "pending_videos": 0,
+                    "handled_percent": 0
+                },
+                "videographers": {},
                 "summary_videographers": {}
-            }
+            })
         
         # Calculate metrics based on version history
         total = int(scope.shape[0]) + history_completed_in_period
@@ -1336,7 +1345,7 @@ async def api_dashboard(mode: str = "month", period: str = ""):
                 logger.error(f"Error processing task {row_idx}: {e}")
         
         # Get CURRENT status counts from ALL tasks (not just in period)
-        df_all = await read_excel_async()
+        df_all = df  # Use the same dataframe we already loaded
         status_all = df_all['Status'].astype(str).str.strip()
         current_pending = int((status_all == 'Critique').sum())
         current_submitted = int((status_all == 'Submitted to Sales').sum())
