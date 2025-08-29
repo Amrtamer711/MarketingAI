@@ -7,7 +7,7 @@ import json
 import asyncio
 from PIL import Image
 from utils import _load_mapping_config, _format_sales_people_hint, _format_locations_hint, _format_videographers_hint, append_to_history, markdown_to_slack
-from excel_utils import save_to_excel, check_duplicate_reference, get_task_by_number, export_current_data, update_task_by_number, delete_task_by_number
+from db_utils import save_task, check_duplicate_async as check_duplicate_reference, get_task as get_task_by_number, export_data_to_slack as export_current_data, update_task as update_task_by_number, delete_task_by_number
 from history import pending_confirmations, pending_edits, pending_deletes, slash_command_responses, user_history
 from management import add_videographer, remove_videographer, add_location, remove_location, list_videographers, list_locations, add_salesperson, remove_salesperson, list_salespeople, update_person_slack_ids
 import requests
@@ -539,7 +539,7 @@ async def handle_confirmation_response(channel: str, user_id: str, user_input: s
                 if dup_action == 'accept':
                     # Remove the flag and save
                     del pending_data['_duplicate_confirm']
-                    result = await save_to_excel(pending_data)
+                    result = await save_task(pending_data)
                     if result["success"]:
                         del pending_confirmations[user_id]
                         task_number = result["task_number"]
@@ -660,7 +660,7 @@ async def handle_confirmation_response(channel: str, user_id: str, user_input: s
                 return warning_msg
             
             # Save and exit (no duplicate)
-            result = await save_to_excel(pending_data)
+            result = await save_task(pending_data)
             if result["success"]:
                 if user_id in pending_confirmations:
                     del pending_confirmations[user_id]

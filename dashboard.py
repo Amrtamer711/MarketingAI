@@ -12,7 +12,7 @@ import pandas as pd
 from fastapi.responses import JSONResponse
 
 from config import UAE_TZ, HISTORY_DB_PATH
-from excel_utils import read_excel_async
+from db_utils import get_all_tasks_df
 from logger import logger
 
 
@@ -161,7 +161,7 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         
         # Load Excel data
         try:
-            df = await read_excel_async()
+            df = await get_all_tasks_df()
             logger.info(f"Loaded {len(df)} tasks from Excel")
         except Exception as e:
             logger.error(f"Failed to read Excel: {e}")

@@ -24,7 +24,7 @@ __all__ = [
 # ========== PYDANTIC MODELS ==========
 class EmailParseRequest(BaseModel):
 	email_text: str
-	save_to_excel: bool = False
+	save_to_database: bool = False
 	submitted_by: str = "API"
 
 class RequestFilter(BaseModel):

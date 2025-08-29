@@ -4,7 +4,7 @@ import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
-from config import EXCEL_FILE_PATH, EMAIL_SENDER, APP_PSWD, REVIEWER_EMAIL, HEAD_OF_DEPT_EMAIL, TESTING_MODE, ESCALATION_DELAY_SECONDS
+from config import EMAIL_SENDER, APP_PSWD, REVIEWER_EMAIL, HEAD_OF_DEPT_EMAIL, TESTING_MODE, ESCALATION_DELAY_SECONDS
 from dropbox_utils import init_dropbox, search_file_in_dropbox, get_latest_version, get_status_from_folder
 from management import load_videographer_config
 from trello_utils import set_trello_due_complete, archive_trello_card, get_trello_card_by_task_number
@@ -64,12 +64,14 @@ def main(test_date=None):
     if not dbx:
         return
     
-    # Read Excel file
+    # Read tasks from database
     try:
-        df = pd.read_excel(EXCEL_FILE_PATH)
+        from db_utils import select_all_tasks, tasks_to_dataframe
+        rows = select_all_tasks()
+        df = tasks_to_dataframe(rows)
         print(f"📊 Found {len(df)} total tasks\n")
     except Exception as e:
-        print(f"❌ Error reading Excel: {e}")
+        print(f"❌ Error reading database: {e}")
         return
     
     # Filter for assigned tasks
@@ -148,6 +150,9 @@ def main(test_date=None):
                 
                 # Update status based on folder
                 new_status = get_status_from_folder(latest_file['folder'])
+                # Update status in database
+                from db_utils import update_task_by_number
+                update_task_by_number(task_number, {'Status': new_status})
                 df.at[idx, 'Status'] = new_status
                 print(f"   ✅ Updated status to: {new_status}")
                 
@@ -475,7 +480,7 @@ Video Tracking System"""
             print(f"✅ Sent escalation to {videographer} for {total_tasks} videos")
     
     # Save updated Excel file with status changes
-    df.to_excel(EXCEL_FILE_PATH, index=False)
+    # Database is already updated throughout the process
     print("\n✅ Updated Excel file with status changes")
     
     print(f"\n📊 Summary:")

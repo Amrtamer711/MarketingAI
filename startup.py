@@ -7,7 +7,7 @@ Run this before starting the main application
 import os
 import shutil
 from pathlib import Path
-from config import EXCEL_FILE_PATH, HISTORY_DB_PATH, CREDENTIALS_PATH, DATA_DIR
+from config import HISTORY_DB_PATH, CREDENTIALS_PATH, DATA_DIR
 
 def ensure_directories():
     """Create required directories if they don't exist"""
@@ -72,20 +72,13 @@ def ensure_history_database():
 
 def ensure_files():
     """Ensure required files exist"""
-    # Check Excel file
-    if not os.path.exists(EXCEL_FILE_PATH):
-        print(f"⚠️  Excel file not found at {EXCEL_FILE_PATH}")
-        # Create empty Excel file with headers
-        import pandas as pd
-        from excel_utils import initialize_excel
-        import asyncio
-        asyncio.run(initialize_excel())
-        print(f"✅ Created new Excel file at {EXCEL_FILE_PATH}")
-    else:
-        print(f"✅ Excel file exists at {EXCEL_FILE_PATH}")
-    
-    # Check/Create SQLite history database
+    # Check/Create SQLite databases
     ensure_history_database()
+    
+    # Initialize main database
+    from db_utils import init_db
+    init_db()
+    print(f"✅ Main database initialized")
     
     # Check Dropbox credentials
     if not os.path.exists(CREDENTIALS_PATH):

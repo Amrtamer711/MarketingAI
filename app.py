@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, HTMLResponse
 
 from clients import slack_client, signature_verifier, api, logger
 from config import UAE_TZ, SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, OPENAI_API_KEY
-from excel_utils import save_to_excel, read_excel_async, initialize_excel
+from db_utils import save_task, get_all_tasks_df, init_db_async
 from history import pending_confirmations
 from llm_utils import main_llm_loop
 from utils import EmailParseRequest, RequestFilter
@@ -75,7 +75,7 @@ async def lifespan(app):
     global BOT_USER_ID
     
     # Initialize Excel if needed
-    await initialize_excel()
+    await init_db_async()
     
     if SLACK_BOT_TOKEN:
         try:
@@ -692,9 +692,9 @@ async def api_parse_email(request: EmailParseRequest):
             del pending_confirmations[temp_user_id]
             
             # Optionally save to Excel if requested
-            if request.save_to_excel:
+            if request.save_to_database:
                 parsed_data["submitted_by"] = request.submitted_by
-                result = await save_to_excel(parsed_data)
+                result = await save_task(parsed_data)
                 if not result["success"]:
                     raise HTTPException(status_code=500, detail="Failed to save to Excel")
                 parsed_data["task_number"] = result["task_number"]
@@ -716,7 +716,7 @@ async def api_parse_email(request: EmailParseRequest):
 async def api_get_requests():
     """API endpoint to retrieve all requests"""
     try:
-        df = await read_excel_async()
+        df = await get_all_tasks_df()
         # Convert to JSON, handling any datetime objects
         requests = df.to_dict(orient="records")
         return JSONResponse({
@@ -731,7 +731,7 @@ async def api_get_requests():
 async def api_export_requests(filters: RequestFilter):
     """API endpoint to export requests with filters"""
     try:
-        df = await read_excel_async()
+        df = await get_all_tasks_df()
         
         # Apply filters asynchronously and safely
         def parse_filter_date(value: str):
@@ -1225,7 +1225,7 @@ async def main():
         exit(1)
     
     # Initialize Excel file
-    await initialize_excel()
+    await init_db_async()
     
     # Get bot user ID - MUST happen before server starts
     bot_id = await get_bot_user_id()

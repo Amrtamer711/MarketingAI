@@ -28,7 +28,6 @@ IS_PRODUCTION = any([
 
 # Data directory configuration
 DATA_DIR = "/data" if IS_PRODUCTION else "data"
-EXCEL_FILE_PATH = f"{DATA_DIR}/design_requests.xlsx"
 
 # Log the environment for debugging
 if IS_PRODUCTION:

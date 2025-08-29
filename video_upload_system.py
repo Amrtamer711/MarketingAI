@@ -1097,7 +1097,7 @@ def extract_task_number(filename: str) -> Optional[int]:
 async def get_task_data(task_number: int) -> Optional[Dict]:
     """Get task data from Excel"""
     try:
-        from excel_utils import get_task_by_number as db_get_task
+        from db_utils import get_task as db_get_task
         task_data = await db_get_task(task_number)
         return task_data
     except Exception as e:
@@ -1950,8 +1950,8 @@ async def handle_sales_rejection(workflow_id: str, user_id: str, response_url: s
                                 rejected_by="Sales")
         
         # Also update returned timestamp since this is a sales rejection
-        from excel_utils import update_movement_timestamp
-        await update_movement_timestamp(task_number, "Returned", version)
+        # update_movement_timestamp is deprecated, timestamps are updated via status update
+        # Timestamp is now handled by update_excel_status above
         
         # Get the video link from the new location
         video_link = await dropbox_manager.get_shared_link(to_path)
@@ -2247,8 +2247,8 @@ async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str
                                 rejected_by="Head of Sales")
         
         # Update returned timestamp
-        from excel_utils import update_movement_timestamp
-        await update_movement_timestamp(task_number, "Returned", version)
+        # update_movement_timestamp is deprecated, timestamps are updated via status update
+        # Timestamp is now handled by update_excel_status above
         
         # Get the video link from returned folder
         video_link = await dropbox_manager.get_shared_link(to_path)

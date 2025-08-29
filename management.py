@@ -4,7 +4,7 @@ from typing import Dict, Any
 from config import TRELLO_API_KEY, TRELLO_API_TOKEN, BOARD_NAME, VIDEOGRAPHER_CONFIG_PATH
 from logger import logger
 from trello_utils import create_trello_list, archive_trello_list, get_list_id_for_videographer
-from excel_utils import read_excel_async
+from db_utils import get_all_tasks_df
 import re
 import requests
 
@@ -121,7 +121,7 @@ async def remove_videographer(name: str) -> Dict[str, Any]:
         
         # Check for active tasks in Excel
         try:
-            df = await read_excel_async()
+            df = await get_all_tasks_df()
             active_tasks = df[(df['Videographer'] == name) & (df['Status'].str.startswith('Assigned to'))]
             if len(active_tasks) > 0:
                 return {
@@ -218,7 +218,7 @@ async def remove_location(location: str) -> Dict[str, Any]:
         
         # Check for tasks with this location in Excel
         try:
-            df = await read_excel_async()
+            df = await get_all_tasks_df()
             location_tasks = df[(df['Location'] == location) & (df['Status'] == 'Not assigned yet')]
             if len(location_tasks) > 0:
                 return {
@@ -333,7 +333,7 @@ async def remove_salesperson(name: str) -> Dict[str, Any]:
         
         # Check for active tasks with this salesperson in Excel
         try:
-            df = await read_excel_async()
+            df = await get_all_tasks_df()
             active_tasks = df[(df['Sales Person'] == name) & (df['Status'] != 'Done')]
             if len(active_tasks) > 0:
                 return {
@@ -368,7 +368,7 @@ async def list_salespeople() -> Dict[str, Any]:
         # Count active tasks per salesperson
         task_counts = {}
         try:
-            df = await read_excel_async()
+            df = await get_all_tasks_df()
             for salesperson in config.get("sales_people", {}):
                 active_tasks = df[(df['Sales Person'] == salesperson) & (df['Status'] != 'Done')]
                 task_counts[salesperson] = len(active_tasks)
