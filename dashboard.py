@@ -342,7 +342,7 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         current_submitted = int((all_statuses == 'Submitted to Sales').sum())
         
         decided_uploads = max(uploads - current_pending, 0)
-        positive_outcomes = accepted_events + submitted_events
+        positive_outcomes = accepted_events + current_submitted
         
         accepted_pct = calculate_percentage(positive_outcomes, decided_uploads) if decided_uploads > 0 else 0.0
         rejected_pct = calculate_percentage(rejected_events + returned_events, decided_uploads) if decided_uploads > 0 else 0.0
