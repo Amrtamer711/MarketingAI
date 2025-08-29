@@ -455,7 +455,7 @@ def calculate_reviewer_stats(tasks_in_period: pd.DataFrame) -> Dict[str, Any]:
     # Calculate averages
     avg_hours = 0
     if response_times:
-        avg_hours = round(sum(response_times) / len(response_times), 1)
+        avg_hours = sum(response_times) / len(response_times)  # Don't round yet to preserve small values
     
     handled_percent = calculate_percentage(submitted_to_accepted, total_submitted)
     
