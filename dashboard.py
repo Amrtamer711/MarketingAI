@@ -16,6 +16,65 @@ from db_utils import get_all_tasks_df
 from logger import logger
 
 
+async def get_historical_tasks_df() -> pd.DataFrame:
+    """Get all completed tasks from history database as a DataFrame"""
+    try:
+        with sqlite3.connect(HISTORY_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """SELECT task_number, brand, campaign_start_date, campaign_end_date, 
+                   reference_number, location, sales_person, submitted_by, status, 
+                   filming_date, videographer, current_version, version_history,
+                   pending_timestamps, submitted_timestamps, returned_timestamps,
+                   rejected_timestamps, accepted_timestamps, completed_at
+                FROM completed_tasks"""
+            )
+            rows = cursor.fetchall()
+            
+            if rows:
+                data = []
+                for row in rows:
+                    task_data = dict(row)
+                    # Map to expected column names (same as live tasks)
+                    mapped_data = {
+                        'Task #': task_data['task_number'],
+                        'Brand': task_data['brand'] or '',
+                        'Campaign Start Date': task_data['campaign_start_date'] or '',
+                        'Campaign End Date': task_data['campaign_end_date'] or '',
+                        'Reference Number': task_data['reference_number'] or '',
+                        'Location': task_data['location'] or '',
+                        'Sales Person': task_data['sales_person'] or '',
+                        'Submitted By': task_data['submitted_by'] or '',
+                        'Status': task_data['status'] or 'Done',
+                        'Filming Date': task_data['filming_date'] or '',
+                        'Videographer': task_data['videographer'] or '',
+                        'Video Filename': '',  # Not stored in history
+                        'Current Version': task_data['current_version'] or '',
+                        'Version History': task_data['version_history'] or '[]',
+                        'Timestamp': task_data['completed_at'] or '',
+                        'Pending Timestamps': task_data['pending_timestamps'] or '',
+                        'Submitted Timestamps': task_data['submitted_timestamps'] or '',
+                        'Returned Timestamps': task_data['returned_timestamps'] or '',
+                        'Rejected Timestamps': task_data['rejected_timestamps'] or '',
+                        'Accepted Timestamps': task_data['accepted_timestamps'] or ''
+                    }
+                    data.append(mapped_data)
+                return pd.DataFrame(data)
+            else:
+                # Return empty DataFrame with proper columns
+                return pd.DataFrame(columns=[
+                    'Task #', 'Brand', 'Campaign Start Date', 'Campaign End Date',
+                    'Reference Number', 'Location', 'Sales Person', 'Submitted By',
+                    'Status', 'Filming Date', 'Videographer', 'Video Filename', 
+                    'Current Version', 'Version History', 'Timestamp',
+                    'Pending Timestamps', 'Submitted Timestamps', 'Returned Timestamps',
+                    'Rejected Timestamps', 'Accepted Timestamps'
+                ])
+    except Exception as e:
+        logger.error(f"Error loading historical tasks: {e}")
+        return pd.DataFrame()
+
+
 def get_empty_dashboard_response(mode: str, period: str) -> Dict[str, Any]:
     """Return empty dashboard response structure"""
     return {
@@ -159,13 +218,26 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         if not period:
             period = datetime.now(UAE_TZ).strftime('%Y-%m' if mode == 'month' else '%Y')
         
-        # Load Excel data
+        # Load live tasks data
         try:
             df = await get_all_tasks_df()
-            logger.info(f"Loaded {len(df)} tasks from Excel")
+            logger.info(f"Loaded {len(df)} live tasks from database")
         except Exception as e:
-            logger.error(f"Failed to read Excel: {e}")
+            logger.error(f"Failed to read live tasks: {e}")
             return JSONResponse(get_empty_dashboard_response(mode, period))
+        
+        # Load historical tasks data
+        try:
+            history_df = await get_historical_tasks_df()
+            logger.info(f"Loaded {len(history_df)} historical tasks from database")
+            
+            # Combine live and historical tasks
+            if len(history_df) > 0:
+                df = pd.concat([df, history_df], ignore_index=True)
+                logger.info(f"Total tasks after combining: {len(df)}")
+        except Exception as e:
+            logger.warning(f"Failed to read historical tasks: {e}")
+            # Continue with just live tasks
         
         # Check if we have any data
         if len(df) == 0:
@@ -200,21 +272,18 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         )
         tasks_in_period = df[df['in_period']].copy()
         
-        # Get historical completed tasks count
-        history_in_period = await get_history_count_in_period(mode, period)
-        
-        logger.info(f"Tasks in period: {len(tasks_in_period)} (Excel) + {history_in_period} (History)")
+        logger.info(f"Tasks in period: {len(tasks_in_period)}")
         
         # Return empty if no tasks in period
-        if len(tasks_in_period) == 0 and history_in_period == 0:
+        if len(tasks_in_period) == 0:
             return JSONResponse(get_empty_dashboard_response(mode, period))
         
         # Initialize counters
-        total_tasks = len(tasks_in_period) + history_in_period
+        total_tasks = len(tasks_in_period)
         assigned_tasks = len(tasks_in_period[
             tasks_in_period['Videographer'].notna() & 
             (tasks_in_period['Videographer'] != '')
-        ]) + history_in_period  # History tasks were all assigned
+        ])
         
         # Process version history for metrics
         uploads = 0
@@ -258,7 +327,7 @@ async def api_dashboard(mode: str = "month", period: str = ""):
                 completed_tasks += 1
         
         # Calculate totals
-        total_completed = completed_tasks + history_in_period
+        total_completed = completed_tasks
         not_completed = max(total_tasks - total_completed, 0)
         
         # Calculate percentages
