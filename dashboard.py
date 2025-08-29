@@ -291,6 +291,7 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         returned_events = 0
         accepted_events = 0
         submitted_events = 0
+        pending_count = 0  # Track unique pending versions
         completed_tasks = 0
         
         # Process each task in period
@@ -310,6 +311,7 @@ async def api_dashboard(mode: str = "month", period: str = ""):
                 # Count unique uploads
                 if folder == 'pending' and version is not None:
                     unique_versions.add(version)
+                    pending_count = len(unique_versions)  # Update pending count
                 
                 # Count events
                 if folder == 'rejected':
@@ -330,9 +332,14 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         total_completed = completed_tasks
         not_completed = max(total_tasks - total_completed, 0)
         
-        # Calculate percentages
-        accepted_pct = calculate_percentage(accepted_events, uploads)
-        rejected_pct = calculate_percentage(rejected_events + returned_events, uploads)
+        # Calculate percentages with benefit of the doubt
+        # For acceptance: count accepted + submitted to sales events as positive
+        # Exclude currently pending videos from the denominator
+        decided_uploads = uploads - current_pending
+        positive_outcomes = accepted_events + submitted_events
+        
+        accepted_pct = calculate_percentage(positive_outcomes, decided_uploads) if decided_uploads > 0 else 0.0
+        rejected_pct = calculate_percentage(rejected_events + returned_events, decided_uploads) if decided_uploads > 0 else 0.0
         
         # Get current status counts (from ALL tasks, not filtered)
         all_statuses = df['Status'].fillna('').astype(str)
@@ -475,6 +482,7 @@ def calculate_videographer_stats(
         vg_rejected = 0
         vg_returned = 0
         vg_accepted = 0
+        vg_submitted_events = 0  # Track submitted to sales events
         
         # Process each task
         for idx, task in vg_tasks.iterrows():
@@ -529,6 +537,7 @@ def calculate_videographer_stats(
                         version_number = f"v{version}"
                     elif folder.lower() == 'submitted to sales':
                         submitted_at = timestamp
+                        vg_submitted_events += 1  # Count submitted events
                     elif folder.lower() == 'accepted':
                         accepted_at = timestamp
                     
@@ -567,6 +576,15 @@ def calculate_videographer_stats(
         vg_submitted = int((vg_statuses == 'Submitted to Sales').sum())
         
         videographer_data[vg] = vg_data
+        
+        # Calculate acceptance rate with benefit of the doubt
+        # Consider accepted + submitted to sales events as positive outcomes
+        # Don't count currently pending videos against them
+        positive_outcomes = vg_accepted + vg_submitted_events
+        # For decided videos: total uploads minus currently pending
+        decided_videos = vg_uploads - vg_pending
+        acceptance_rate = calculate_percentage(positive_outcomes, decided_videos) if decided_videos > 0 else 100.0
+        
         videographer_summary[vg] = {
             'total': len(vg_tasks),
             'uploads': vg_uploads,
@@ -575,7 +593,7 @@ def calculate_videographer_stats(
             'submitted_to_sales': vg_submitted,
             'returned': vg_returned,
             'accepted_videos': vg_accepted,
-            'accepted_pct': calculate_percentage(vg_accepted, vg_uploads)
+            'accepted_pct': acceptance_rate
         }
     
     return videographer_data, videographer_summary
