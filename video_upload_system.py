@@ -1184,78 +1184,25 @@ async def update_excel_status(task_number: int, folder: str, version: Optional[i
         
         new_status = folder_to_status.get(folder, "Unknown")
         
-        # Update Excel (use safe read)
-        from excel_lock_utils import safe_read_excel, safe_write_excel
-        df = await safe_read_excel()
-        row_mask = df['Task #'] == task_number
-        if not row_mask.any():
+        # Update using DB
+        from db_utils import get_task_by_number, update_status_with_history_and_timestamp
+        task_row = get_task_by_number(task_number)
+        if not task_row:
             logger.error(f"Task #{task_number} not found when updating status")
             return
         
-        df.loc[row_mask, 'Status'] = new_status
+        # Update status and history in DB
+        success = update_status_with_history_and_timestamp(
+            task_number=task_number,
+            folder=folder,
+            version=version,
+            rejection_reason=rejection_reason,
+            rejection_class=rejection_class,
+            rejected_by=rejected_by
+        )
         
-        # Update current version and append to version history with rejection info if applicable
-        if version is not None:
-            if 'Current Version' not in df.columns:
-                df['Current Version'] = ''
-            df.loc[row_mask, 'Current Version'] = version
-            
-            if 'Version History' not in df.columns:
-                df['Version History'] = '[]'
-            try:
-                hist_json = df.loc[row_mask, 'Version History'].values[0]
-                history = json.loads(hist_json) if isinstance(hist_json, str) and hist_json else []
-            except Exception:
-                history = []
-            
-            event_time = datetime.now(UAE_TZ).strftime("%d-%m-%Y %H:%M:%S")
-            history_entry = {"version": version, "folder": folder, "at": event_time}
-            
-            # Add rejection info if provided (for both rejected and returned)
-            if (folder.lower() in ["rejected", "returned"]) and rejection_class:
-                history_entry["rejection_class"] = rejection_class
-                history_entry["rejection_comments"] = rejection_reason or ""
-                if rejected_by:
-                    history_entry["rejected_by"] = rejected_by
-            
-            history.append(history_entry)
-            df.loc[row_mask, 'Version History'] = json.dumps(history)
-        
-        # Movement timestamp update inline (single write) using same mapping as excel_utils.update_movement_timestamp
-        try:
-            folder_to_column = {
-                "pending": "Pending Timestamps",
-                "Pending": "Pending Timestamps",
-                "Critique": "Pending Timestamps",
-                "submitted": "Submitted Timestamps", 
-                "Submitted to Sales": "Submitted Timestamps",
-                "returned": "Returned Timestamps",
-                "Returned": "Returned Timestamps",
-                "rejected": "Rejected Timestamps",
-                "Rejected": "Rejected Timestamps",
-                "Editing": "Rejected Timestamps",
-                "accepted": "Accepted Timestamps",
-                "Accepted": "Accepted Timestamps",
-                "Done": "Accepted Timestamps"
-            }
-            column_name = folder_to_column.get(folder) or folder_to_column.get(new_status)
-            if column_name:
-                if column_name not in df.columns:
-                    df[column_name] = ""
-                idx = df[row_mask].index[0]
-                current_timestamps = str(df.at[idx, column_name]) if pd.notna(df.at[idx, column_name]) else ""
-                timestamps_list = current_timestamps.split("; ") if current_timestamps else []
-                ts = datetime.now(UAE_TZ).strftime("%d-%m-%Y %H:%M:%S")
-                entry = f"v{version}:{ts}" if version is not None else ts
-                timestamps_list.append(entry)
-                df.at[idx, column_name] = "; ".join(timestamps_list)
-        except Exception as e:
-            logger.warning(f"Movement timestamp inline update skipped: {e}")
-        
-        # Single write
-        success = await safe_write_excel(df)
         if not success:
-            logger.error(f"Failed to update Excel status - file may be locked")
+            logger.error(f"Failed to update DB status for task {task_number}")
             return
         
         # If status is "Done", archive the task and remove from Excel
