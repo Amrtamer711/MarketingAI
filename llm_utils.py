@@ -1092,7 +1092,6 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                 else:
                     answer = await export_current_data(
                         include_history=args.get("include_history", True),
-                        format="files",
                         channel=channel,
                         user_id=user_id
                     )
