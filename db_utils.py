@@ -422,12 +422,14 @@ async def export_data_to_slack(include_history: bool = True, channel: str = None
         live_count = len(df)
         with NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             tmp_path = tmp.name
-        await asyncio.to_thread(df.to_excel, tmp_path, False)
+        await asyncio.to_thread(df.to_excel, tmp_path, index=False)
         with open(tmp_path, 'rb') as f:
-            result = await slack_client.files_upload(
-                channels=channel,
+            filename = f"design_requests_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.xlsx"
+            result = await slack_client.files_upload_v2(
+                channel=channel,
                 file=f,
-                filename=f"design_requests_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.xlsx",
+                filename=filename,
+                title=filename,
                 initial_comment=f"📋 Excel file with {live_count} live tasks"
             )
         try:
@@ -451,10 +453,12 @@ async def export_data_to_slack(include_history: bool = True, channel: str = None
                     cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
                     history_count = cursor.fetchone()[0]
                 with open(HISTORY_DB_PATH, 'rb') as f:
-                    result = await slack_client.files_upload(
-                        channels=channel,
+                    filename_db = f"history_logs_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.db"
+                    result = await slack_client.files_upload_v2(
+                        channel=channel,
                         file=f,
-                        filename=f"history_logs_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.db",
+                        filename=filename_db,
+                        title=filename_db,
                         initial_comment=f"✅ History database with {history_count} completed tasks"
                     )
                 if result.get('ok'):
