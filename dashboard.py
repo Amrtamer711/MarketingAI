@@ -336,16 +336,16 @@ async def api_dashboard(mode: str = "month", period: str = ""):
         # Calculate percentages with benefit of the doubt
         # For acceptance: count accepted + submitted to sales events as positive
         # Exclude currently pending videos from the denominator
-        decided_uploads = uploads - current_pending
-        positive_outcomes = accepted_events + submitted_events
-        
-        accepted_pct = calculate_percentage(positive_outcomes, decided_uploads) if decided_uploads > 0 else 0.0
-        rejected_pct = calculate_percentage(rejected_events + returned_events, decided_uploads) if decided_uploads > 0 else 0.0
-        
         # Get current status counts (from ALL tasks, not filtered)
         all_statuses = df['Status'].fillna('').astype(str)
         current_pending = int((all_statuses == 'Critique').sum())
         current_submitted = int((all_statuses == 'Submitted to Sales').sum())
+        
+        decided_uploads = max(uploads - current_pending, 0)
+        positive_outcomes = accepted_events + submitted_events
+        
+        accepted_pct = calculate_percentage(positive_outcomes, decided_uploads) if decided_uploads > 0 else 0.0
+        rejected_pct = calculate_percentage(rejected_events + returned_events, decided_uploads) if decided_uploads > 0 else 0.0
         
         # Calculate reviewer metrics
         reviewer_stats = calculate_reviewer_stats(tasks_in_period)
