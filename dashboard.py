@@ -467,11 +467,8 @@ def calculate_videographer_stats(
         (tasks_in_period['Videographer'] != '')
     ]['Videographer'].unique()
     
-    logger.info(f"Found {len(videographers)} unique videographers in period")
-    
     for vg in videographers:
         vg_tasks = tasks_in_period[tasks_in_period['Videographer'] == vg]
-        logger.info(f"Processing {len(vg_tasks)} tasks for videographer: {vg}")
         
         vg_data = []
         vg_uploads = 0
@@ -481,109 +478,69 @@ def calculate_videographer_stats(
         
         # Process each task
         for idx, task in vg_tasks.iterrows():
-            # Get task data - handle both Series access methods
-            task_num = safe_str(task.get('Task #', '') if hasattr(task, 'get') else task['Task #'])
-            brand = safe_str(task.get('Brand', '') if hasattr(task, 'get') else task['Brand'])
-            reference = safe_str(task.get('Reference Number', '') if hasattr(task, 'get') else task['Reference Number'])
-            status = safe_str(task.get('Status', '') if hasattr(task, 'get') else task['Status'])
-            current_version = safe_str(task.get('Current Version', '') if hasattr(task, 'get') else task['Current Version'])
-            filming_date = safe_str(task.get('Filming Date', '') if hasattr(task, 'get') else task['Filming Date'])
-            
-            # Parse timestamps
-            pending_ts = safe_str(task.get('Pending Timestamps', '') if hasattr(task, 'get') else task.get('Pending Timestamps', ''))
-            submitted_ts = safe_str(task.get('Submitted Timestamps', '') if hasattr(task, 'get') else task.get('Submitted Timestamps', ''))
-            accepted_ts = safe_str(task.get('Accepted Timestamps', '') if hasattr(task, 'get') else task.get('Accepted Timestamps', ''))
-            
-            # Extract metadata from timestamps
-            filming_deadline = filming_date if filming_date else 'NA'
-            uploaded_version = 'NA'
-            version_number = 'NA'
-            submitted_at = 'NA'
-            accepted_at = 'NA'
-            
-            # Parse pending timestamps for upload info
-            if pending_ts:
-                # Format: "v1:DD-MM-YYYY HH:MM:SS; v2:DD-MM-YYYY HH:MM:SS"
-                parts = pending_ts.split('; ')
-                if parts:
-                    last_upload = parts[-1]  # Get most recent upload
-                    if ':' in last_upload:
-                        version_part, time_part = last_upload.split(':', 1)
-                        uploaded_version = time_part.strip()
-                        version_number = version_part.strip()
-            
-            # Parse submitted timestamps
-            if submitted_ts:
-                parts = submitted_ts.split('; ')
-                if parts:
-                    last_submit = parts[-1]
-                    if ':' in last_submit:
-                        _, time_part = last_submit.split(':', 1)
-                        submitted_at = time_part.strip()
-                    else:
-                        submitted_at = last_submit.strip()
-            
-            # Parse accepted timestamps
-            if accepted_ts:
-                parts = accepted_ts.split('; ')
-                if parts:
-                    last_accept = parts[-1]
-                    if ':' in last_accept:
-                        _, time_part = last_accept.split(':', 1)
-                        accepted_at = time_part.strip()
-                    else:
-                        accepted_at = last_accept.strip()
-            
-            # Build task info with metadata
+            # Simple extraction of task data
             task_info = {
-                'task_number': task_num,
-                'brand': brand,
-                'reference': reference,
-                'status': status,
-                'version': current_version if current_version else version_number,
-                'filming_deadline': filming_deadline,
-                'uploaded_version': uploaded_version,
-                'version_number': version_number,
-                'submitted_at': submitted_at,
-                'accepted_at': accepted_at,
+                'task_number': safe_str(task.get('Task #')),
+                'brand': safe_str(task.get('Brand')),
+                'reference': safe_str(task.get('Reference Number')),
+                'status': safe_str(task.get('Status')),
+                'version': safe_str(task.get('Current Version')),
+                'filming_deadline': safe_str(task.get('Filming Date')),
                 'versions': []
             }
             
-            # Parse version history
-            vh_str = task.get('Version History', '[]') if hasattr(task, 'get') else task.get('Version History', '[]')
-            version_history = safe_parse_json(vh_str)
+            # Parse version history JSON directly
+            version_history = safe_parse_json(task.get('Version History', '[]'))
             unique_versions = set()
             
-            # Build version events list
-            version_events = []
+            # Extract data from version history
+            latest_upload = None
+            latest_submit = None
+            latest_accept = None
+            
             for event in version_history:
                 if isinstance(event, dict):
                     folder = str(event.get('folder', '')).lower()
                     version = event.get('version')
                     timestamp = event.get('at', '')
                     
-                    if folder and timestamp:
-                        version_events.append({
-                            'version': str(version) if version else 'NA',
-                            'status': folder.title(),
-                            'at': timestamp,
-                            'rejection_class': event.get('rejection_class', ''),
-                            'rejection_comments': event.get('rejection_comments', '')
-                        })
-                    
+                    # Track latest events
                     if folder == 'pending' and version:
                         unique_versions.add(version)
+                        if not latest_upload or timestamp > latest_upload['at']:
+                            latest_upload = {'version': version, 'at': timestamp}
+                    elif folder == 'submitted to sales':
+                        if not latest_submit or timestamp > latest_submit['at']:
+                            latest_submit = {'at': timestamp}
+                    elif folder == 'accepted':
+                        if not latest_accept or timestamp > latest_accept['at']:
+                            latest_accept = {'at': timestamp}
                     
+                    # Count events
                     if folder == 'rejected':
                         vg_rejected += 1
                     elif folder == 'returned':
                         vg_returned += 1
                     elif folder == 'accepted':
                         vg_accepted += 1
+                    
+                    # Add to versions list
+                    task_info['versions'].append({
+                        'version': str(version) if version else 'NA',
+                        'status': folder.title(),
+                        'at': timestamp,
+                        'rejection_class': event.get('rejection_class', ''),
+                        'rejection_comments': event.get('rejection_comments', '')
+                    })
             
-            # Sort version events by timestamp
-            version_events.sort(key=lambda x: x['at'], reverse=True)
-            task_info['versions'] = version_events[:5]  # Keep last 5 events
+            # Set metadata from version history
+            task_info['uploaded_version'] = latest_upload['at'] if latest_upload else 'NA'
+            task_info['version_number'] = f"v{latest_upload['version']}" if latest_upload else 'NA'
+            task_info['submitted_at'] = latest_submit['at'] if latest_submit else 'NA'
+            task_info['accepted_at'] = latest_accept['at'] if latest_accept else 'NA'
+            
+            # Sort versions by timestamp (most recent first)
+            task_info['versions'].sort(key=lambda x: x['at'], reverse=True)
             
             vg_uploads += len(unique_versions)
             vg_data.append(task_info)
@@ -605,7 +562,5 @@ def calculate_videographer_stats(
             'accepted_videos': vg_accepted,
             'accepted_pct': calculate_percentage(vg_accepted, vg_uploads)
         }
-        
-        logger.info(f"Videographer {vg} summary: {videographer_summary[vg]}")
     
     return videographer_data, videographer_summary
