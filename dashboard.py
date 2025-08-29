@@ -588,9 +588,9 @@ def calculate_videographer_stats(
         videographer_data[vg] = vg_data
         
         # Calculate acceptance rate with benefit of the doubt
-        # Consider accepted + submitted to sales events as positive outcomes
+        # Consider accepted + currently submitted to sales as positive outcomes
         # Don't count currently pending videos against them
-        positive_outcomes = vg_accepted + vg_submitted_events
+        positive_outcomes = vg_accepted + vg_submitted
         # For decided videos: total uploads minus currently pending
         decided_videos = vg_uploads - vg_pending
         acceptance_rate = calculate_percentage(positive_outcomes, decided_videos) if decided_videos > 0 else 100.0
