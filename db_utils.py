@@ -428,8 +428,7 @@ async def export_data_to_slack(include_history: bool = True, channel: str = None
                 channel=channel,
                 file=f,
                 filename=f"design_requests_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.xlsx",
-                title="Current Live Tasks (from DB)",
-                initial_comment=f"📋 **Excel file with {live_count} live tasks**"
+                initial_comment=f"📋 *Excel file with {live_count} live tasks*"
             )
         try:
             os.remove(tmp_path)
@@ -456,8 +455,7 @@ async def export_data_to_slack(include_history: bool = True, channel: str = None
                         channel=channel,
                         file=f,
                         filename=f"history_logs_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.db",
-                        title="History Database (Completed Tasks)",
-                        initial_comment=f"✅ **History database with {history_count} completed tasks**"
+                        initial_comment=f"✅ *History database with {history_count} completed tasks*"
                     )
                 if result.get('ok'):
                     files_sent.append("History DB")
@@ -473,12 +471,12 @@ async def export_data_to_slack(include_history: bool = True, channel: str = None
     response += "\n" + "=" * 50 + "\n"
     if files_sent:
         response += f"\n✅ **Successfully exported {', '.join(files_sent)}**\n\n"
-        response += "**How to view the files:**\n"
-        response += "• **Excel (.xlsx)** - Open with Microsoft Excel, Google Sheets, or any spreadsheet app\n"
-        response += "• **Database (.db)** - Open with SQLite browser or any SQLite viewer\n"
-        response += "\n_Files contain sensitive business data - handle with care_"
+        response += "*How to view the files:*\n"
+        response += "• *Excel (.xlsx)* - Open with Microsoft Excel, Google Sheets, or any spreadsheet app\n"
+        response += "• *Database (.db)* - Open with SQLite browser or any SQLite viewer\n"
+        response += "\n*Files contain sensitive business data - handle with care*"
     else:
-        response += "\n❌ **No files were exported successfully**"
+        response += "\n❌ *No files were exported successfully*"
     response += f"\n\n_Export requested at {datetime.now(UAE_TZ).strftime('%d-%m-%Y %H:%M:%S')} UAE Time_"
     return response
 
