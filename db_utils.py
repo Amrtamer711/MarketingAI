@@ -532,6 +532,11 @@ async def check_duplicate_async(reference_number: str) -> Dict[str, Any]:
 async def delete_task_by_number(task_number: int) -> Dict[str, Any]:
     """Delete a task by task number (archive into history then remove from live)"""
     try:
+        # First update the task status to "Archived"
+        with _connect() as conn:
+            conn.execute(f"UPDATE {LIVE_TABLE} SET Status='Archived' WHERE task_number=?", (task_number,))
+        
+        # Then archive the task
         ok = archive_task(task_number)
         if ok:
             return {"success": True, "task_data": {"Task #": task_number}}

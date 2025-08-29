@@ -27,7 +27,8 @@ async def get_historical_tasks_df() -> pd.DataFrame:
                    filming_date, videographer, current_version, version_history,
                    pending_timestamps, submitted_timestamps, returned_timestamps,
                    rejected_timestamps, accepted_timestamps, completed_at
-                FROM completed_tasks"""
+                FROM completed_tasks
+                WHERE status != 'Archived'"""  # Exclude archived tasks
             )
             rows = cursor.fetchall()
             
@@ -200,7 +201,7 @@ async def get_history_count_in_period(mode: str, period: str) -> int:
                 pattern = f"%-{month}-{year}"
             
             cursor = conn.execute(
-                "SELECT COUNT(*) FROM completed_tasks WHERE filming_date LIKE ?",
+                "SELECT COUNT(*) FROM completed_tasks WHERE filming_date LIKE ? AND status != 'Archived'",
                 (pattern,)
             )
             return cursor.fetchone()[0]
