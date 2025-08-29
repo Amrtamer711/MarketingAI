@@ -715,9 +715,45 @@ async def handle_confirmation_response(channel: str, user_id: str, user_input: s
         return "❌ Error processing your response. Please try again."
 
 
+# ========== HELPER FUNCTION FOR SENDING RESPONSES ==========
+async def send_response_and_cleanup(channel: str, answer: str, thinking_msg: str = None, is_slash_command: bool = False, response_url: str = None):
+    """Send response and clean up thinking message"""
+    # Delete thinking message if it exists
+    if thinking_msg:
+        try:
+            await slack_client.chat_delete(channel=channel, ts=thinking_msg)
+        except Exception as e:
+            logger.debug(f"Could not delete thinking message: {e}")
+    
+    # Send the actual response
+    if is_slash_command and response_url:
+        # Try to send as slash command response
+        try:
+            response = requests.post(response_url, json={"text": markdown_to_slack(answer)})
+            response.raise_for_status()
+            logger.info(f"✅ Sent slash command response to {response_url}")
+            return
+        except Exception as e:
+            logger.error(f"❌ Failed to send slash command response: {e}")
+    
+    # Send regular message
+    await slack_client.chat_postMessage(channel=channel, text=markdown_to_slack(answer))
+
+
 # ========== MAIN LLM LOOP ==========
 async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list = None):
     """Main conversational loop with OpenAI responses API"""
+    # Send thinking message immediately
+    thinking_msg = None
+    try:
+        thinking_response = await slack_client.chat_postMessage(
+            channel=channel,
+            text="⏳ Please wait..."
+        )
+        thinking_msg = thinking_response.get("ts")
+    except Exception as e:
+        logger.debug(f"Could not send thinking message: {e}")
+    
     # Get user's display name
     try:
         res = await slack_client.users_info(user=user_id)
@@ -741,6 +777,13 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
             if user_id not in pending_confirmations:  # Only clean up if confirmation is done
                 del slash_command_responses[user_id]
             
+            # Delete thinking message first
+            if thinking_msg:
+                try:
+                    await slack_client.chat_delete(channel=channel, ts=thinking_msg)
+                except:
+                    pass
+            
             # Send response using the slash command response URL
             response_data = {
                 "response_type": "in_channel",
@@ -757,9 +800,10 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                 logger.info(f"✅ Sent slash command confirmation response to {response_url}")
             except Exception as e:
                 logger.error(f"❌ Failed to send slash command confirmation response: {e}")
+                # Fall back to regular message
                 await slack_client.chat_postMessage(channel=channel, text=markdown_to_slack(answer))
         else:
-            await slack_client.chat_postMessage(channel=channel, text=markdown_to_slack(answer))
+            await send_response_and_cleanup(channel=channel, answer=answer, thinking_msg=thinking_msg)
         
         append_to_history(user_id, "user", user_input)
         append_to_history(user_id, "assistant", answer)
@@ -840,7 +884,7 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
             logger.error(f"Error parsing delete confirmation: {e}")
             answer = "I didn't understand your response. Please say 'yes' to delete or 'no' to cancel."
         
-        await slack_client.chat_postMessage(channel=channel, text=markdown_to_slack(answer))
+        await send_response_and_cleanup(channel=channel, answer=answer, thinking_msg=thinking_msg)
         append_to_history(user_id, "user", user_input)
         append_to_history(user_id, "assistant", answer)
         return
@@ -923,7 +967,7 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
         else:
             answer = await handle_edit_task_flow(channel, user_id, user_input, task_number, current_data)
         
-        await slack_client.chat_postMessage(channel=channel, text=markdown_to_slack(answer))
+        await send_response_and_cleanup(channel=channel, answer=answer, thinking_msg=thinking_msg)
         append_to_history(user_id, "user", user_input)
         append_to_history(user_id, "assistant", answer)
         return
@@ -1433,15 +1477,21 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
             except Exception as e:
                 logger.error(f"❌ Failed to send slash command response: {e}")
                 # Fall back to regular message
-                await slack_client.chat_postMessage(channel=channel, text=markdown_to_slack(answer))
+                await send_response_and_cleanup(channel=channel, answer=answer, thinking_msg=thinking_msg)
         else:
             # Send regular response to Slack
             try:
-                await slack_client.chat_postMessage(channel=channel, text=markdown_to_slack(answer))
+                await send_response_and_cleanup(channel=channel, answer=answer, thinking_msg=thinking_msg)
             except Exception as e:
                 if "channel_not_found" in str(e):
                     # Bot not in channel, send DM instead
                     try:
+                        # Still delete thinking message from original channel
+                        if thinking_msg:
+                            try:
+                                await slack_client.chat_delete(channel=channel, ts=thinking_msg)
+                            except:
+                                pass
                         await slack_client.chat_postMessage(channel=user_id, text=markdown_to_slack(
                             f"📨 *Response sent via DM (I'm not in that channel)*\n\n{answer}\n\n"
                             "_To use me in channels, please invite me first._"
