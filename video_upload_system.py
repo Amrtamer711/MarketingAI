@@ -21,7 +21,7 @@ from clients import slack_client
 from config import CREDENTIALS_PATH, UAE_TZ, SLACK_BOT_TOKEN, OPENAI_API_KEY, VIDEOGRAPHER_CONFIG_PATH
 from logger import logger
 from simple_permissions import check_permission as simple_check_permission
-from utils import load_videographer_config
+from management import load_videographer_config
 
 # Helper functions to get reviewer and head of sales info
 def get_reviewer_info() -> Dict[str, str]:
