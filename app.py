@@ -1108,13 +1108,13 @@ async def dashboard():
                 <div class=\"flex flex-nowrap items-center justify-between gap-4\"> 
                   <div>
                     <div class=\"font-medium\">Task #${t.task_number} — ${t.brand}</div>
-                    <div class=\"text-sm text-gray-300\">Ref: ${t.reference_number || 'NA'}</div>
+                    <div class=\"text-sm text-gray-300\">Ref: ${t.reference || 'NA'}</div>
                   </div>
                   <div class=\"text-sm text-gray-200 whitespace-nowrap overflow-x-auto no-scrollbar\"> 
-                    <span class=\"chip\">Filming Deadline: ${t.filming_date || 'NA'}</span>
-                    <span class=\"chip\">Uploaded Last Version: ${t.submitted_at || 'NA'}</span>
-                    <span class=\"chip\">Current Version Number: ${t.current_version || 'NA'}</span>
-                    <span class=\"chip\">Submitted to Sales at: ${t.submitted_to_sales_at || 'NA'}</span>
+                    <span class=\"chip\">Filming Deadline: ${t.filming_deadline || 'NA'}</span>
+                    <span class=\"chip\">Uploaded Last Version: ${t.uploaded_version || 'NA'}</span>
+                    <span class=\"chip\">Current Version Number: ${t.version_number || 'NA'}</span>
+                    <span class=\"chip\">Submitted to Sales at: ${t.submitted_at || 'NA'}</span>
                     <span class=\"chip\">Accepted at: ${t.accepted_at || 'NA'}</span>
                   </div>
                 </div>

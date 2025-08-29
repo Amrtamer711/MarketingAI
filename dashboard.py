@@ -478,69 +478,84 @@ def calculate_videographer_stats(
         
         # Process each task
         for idx, task in vg_tasks.iterrows():
-            # Simple extraction of task data
+            # Parse version history JSON
+            version_history_str = task.get('Version History', '[]')
+            version_history = safe_parse_json(version_history_str)
+            
+            # Initialize metadata
+            filming_deadline = safe_str(task.get('Filming Date'))
+            uploaded_version = 'NA'
+            version_number = 'NA'
+            submitted_at = 'NA'
+            accepted_at = 'NA'
+            
+            # Process version history to extract latest events
+            unique_versions = set()
+            versions_dict = {}  # Group events by version number
+            
+            for event in version_history:
+                if isinstance(event, dict):
+                    folder = event.get('folder', '')
+                    version = event.get('version')
+                    timestamp = event.get('at', '')
+                    
+                    # Group events by version
+                    if version:
+                        if version not in versions_dict:
+                            versions_dict[version] = {'version': version, 'lifecycle': []}
+                        
+                        # Create lifecycle event
+                        lifecycle_event = {
+                            'stage': folder,
+                            'at': timestamp
+                        }
+                        
+                        # Add rejection details if present
+                        if folder.lower() in ['rejected', 'returned']:
+                            if event.get('rejection_class'):
+                                lifecycle_event['rejection_class'] = event['rejection_class']
+                            if event.get('rejection_comments'):
+                                lifecycle_event['rejection_comments'] = event['rejection_comments']
+                            if event.get('rejected_by'):
+                                lifecycle_event['rejected_by'] = event['rejected_by']
+                        
+                        versions_dict[version]['lifecycle'].append(lifecycle_event)
+                    
+                    # Track metadata based on folder type
+                    if folder.lower() == 'pending' and version:
+                        unique_versions.add(version)
+                        # Update upload info (keep latest)
+                        uploaded_version = timestamp
+                        version_number = f"v{version}"
+                    elif folder.lower() == 'submitted to sales':
+                        submitted_at = timestamp
+                    elif folder.lower() == 'accepted':
+                        accepted_at = timestamp
+                    
+                    # Count events
+                    if folder.lower() == 'rejected':
+                        vg_rejected += 1
+                    elif folder.lower() == 'returned':
+                        vg_returned += 1
+                    elif folder.lower() == 'accepted':
+                        vg_accepted += 1
+            
+            # Convert versions dict to list sorted by version number (descending)
+            versions_for_display = sorted(versions_dict.values(), key=lambda x: x['version'], reverse=True)
+            
+            # Build task info
             task_info = {
                 'task_number': safe_str(task.get('Task #')),
                 'brand': safe_str(task.get('Brand')),
                 'reference': safe_str(task.get('Reference Number')),
                 'status': safe_str(task.get('Status')),
-                'version': safe_str(task.get('Current Version')),
-                'filming_deadline': safe_str(task.get('Filming Date')),
-                'versions': []
+                'filming_deadline': filming_deadline,
+                'uploaded_version': uploaded_version,
+                'version_number': version_number,
+                'submitted_at': submitted_at,
+                'accepted_at': accepted_at,
+                'versions': versions_for_display  # Use the properly formatted version list
             }
-            
-            # Parse version history JSON directly
-            version_history = safe_parse_json(task.get('Version History', '[]'))
-            unique_versions = set()
-            
-            # Extract data from version history
-            latest_upload = None
-            latest_submit = None
-            latest_accept = None
-            
-            for event in version_history:
-                if isinstance(event, dict):
-                    folder = str(event.get('folder', '')).lower()
-                    version = event.get('version')
-                    timestamp = event.get('at', '')
-                    
-                    # Track latest events
-                    if folder == 'pending' and version:
-                        unique_versions.add(version)
-                        if not latest_upload or timestamp > latest_upload['at']:
-                            latest_upload = {'version': version, 'at': timestamp}
-                    elif folder == 'submitted to sales':
-                        if not latest_submit or timestamp > latest_submit['at']:
-                            latest_submit = {'at': timestamp}
-                    elif folder == 'accepted':
-                        if not latest_accept or timestamp > latest_accept['at']:
-                            latest_accept = {'at': timestamp}
-                    
-                    # Count events
-                    if folder == 'rejected':
-                        vg_rejected += 1
-                    elif folder == 'returned':
-                        vg_returned += 1
-                    elif folder == 'accepted':
-                        vg_accepted += 1
-                    
-                    # Add to versions list
-                    task_info['versions'].append({
-                        'version': str(version) if version else 'NA',
-                        'status': folder.title(),
-                        'at': timestamp,
-                        'rejection_class': event.get('rejection_class', ''),
-                        'rejection_comments': event.get('rejection_comments', '')
-                    })
-            
-            # Set metadata from version history
-            task_info['uploaded_version'] = latest_upload['at'] if latest_upload else 'NA'
-            task_info['version_number'] = f"v{latest_upload['version']}" if latest_upload else 'NA'
-            task_info['submitted_at'] = latest_submit['at'] if latest_submit else 'NA'
-            task_info['accepted_at'] = latest_accept['at'] if latest_accept else 'NA'
-            
-            # Sort versions by timestamp (most recent first)
-            task_info['versions'].sort(key=lambda x: x['at'], reverse=True)
             
             vg_uploads += len(unique_versions)
             vg_data.append(task_info)
