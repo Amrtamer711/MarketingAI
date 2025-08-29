@@ -5,6 +5,7 @@ from datetime import datetime
 import pandas as pd
 import asyncio
 import os
+import json
 
 from config import HISTORY_DB_PATH, UAE_TZ
 from logger import logger
@@ -216,7 +217,7 @@ def update_status_with_history_and_timestamp(task_number: int, folder: str, vers
                 if version is not None:
                     vh = row["Version History"] or '[]'
                     try:
-                        history = pd.io.json.loads(vh) if isinstance(vh, str) else []
+                        history = json.loads(vh) if isinstance(vh, str) else []
                     except Exception:
                         history = []
                     event_time = datetime.now(UAE_TZ).strftime("%d-%m-%Y %H:%M:%S")
@@ -227,7 +228,7 @@ def update_status_with_history_and_timestamp(task_number: int, folder: str, vers
                         if rejected_by:
                             entry["rejected_by"] = rejected_by
                     history.append(entry)
-                    conn.execute(f"UPDATE {LIVE_TABLE} SET 'Version History'=? WHERE task_number=?", (pd.io.json.dumps(history), task_number))
+                    conn.execute(f"UPDATE {LIVE_TABLE} SET 'Version History'=? WHERE task_number=?", (json.dumps(history), task_number))
                 # Movement timestamp
                 col = folder_to_column.get(folder) or folder_to_column.get(new_status)
                 if col:
