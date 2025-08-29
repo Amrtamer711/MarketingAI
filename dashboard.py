@@ -395,7 +395,8 @@ def calculate_reviewer_stats(tasks_in_period: pd.DataFrame) -> Dict[str, Any]:
     """Calculate reviewer statistics from tasks"""
     response_times = []
     reviewer_handled = 0
-    reviewer_accepted = 0
+    submitted_to_accepted = 0  # Videos that went from submitted to accepted
+    total_submitted = 0  # Total videos submitted to sales
     
     for idx, task in tasks_in_period.iterrows():
         version_history = safe_parse_json(task.get('Version History', '[]'))
@@ -415,6 +416,8 @@ def calculate_reviewer_stats(tasks_in_period: pd.DataFrame) -> Dict[str, Any]:
         # Analyze each version's journey
         for version, events in versions.items():
             pending_time = None
+            was_submitted = False
+            was_accepted = False
             
             # Sort events by timestamp
             sorted_events = sorted(events, key=lambda x: x.get('at', ''))
@@ -435,29 +438,35 @@ def calculate_reviewer_stats(tasks_in_period: pd.DataFrame) -> Dict[str, Any]:
                     pending_time = timestamp
                 elif folder in ['rejected', 'submitted to sales'] and pending_time:
                     reviewer_handled += 1
-                    if folder == 'submitted to sales':
-                        reviewer_accepted += 1
                     
                     # Calculate response time
                     delta_hours = (timestamp - pending_time).total_seconds() / 3600.0
                     if delta_hours > 0:
                         response_times.append(delta_hours)
-                    break
+                
+                # Track submission and acceptance
+                if folder == 'submitted to sales' and not was_submitted:
+                    was_submitted = True
+                    total_submitted += 1
+                elif folder == 'accepted' and was_submitted and not was_accepted:
+                    was_accepted = True
+                    submitted_to_accepted += 1
     
     # Calculate averages
     avg_hours = 0
     if response_times:
         avg_hours = round(sum(response_times) / len(response_times), 1)
     
-    handled_percent = calculate_percentage(reviewer_accepted, reviewer_handled)
+    handled_percent = calculate_percentage(submitted_to_accepted, total_submitted)
     
     return {
         "avg_response_hours": avg_hours,
         "avg_response_display": format_duration(avg_hours),
         "pending_videos": 0,  # Will be set by caller
         "handled": reviewer_handled,
-        "accepted": reviewer_accepted,
-        "handled_percent": handled_percent
+        "accepted": submitted_to_accepted,
+        "handled_percent": handled_percent,
+        "total_submitted": total_submitted
     }
 
 
