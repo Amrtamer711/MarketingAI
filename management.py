@@ -457,3 +457,178 @@ async def update_person_slack_ids(person_type: str, person_name: str, slack_user
         logger.error(f"Error updating Slack IDs: {e}")
         return {"success": False, "error": str(e)}
 
+# ========== SINGLE-PERSON STAKEHOLDER EDIT FUNCTIONS ==========
+async def edit_reviewer(name: str = None, email: str = None, slack_user_id: str = None, slack_channel_id: str = None, active: bool = None) -> Dict[str, Any]:
+    """Edit the reviewer's information"""
+    try:
+        config = load_videographer_config()
+        
+        # Initialize reviewer if not exists
+        if "reviewer" not in config:
+            config["reviewer"] = {
+                "name": "Reviewer",
+                "email": "",
+                "slack_user_id": "",
+                "slack_channel_id": "",
+                "active": True
+            }
+        
+        reviewer = config["reviewer"]
+        updated_fields = []
+        
+        # Update provided fields
+        if name is not None:
+            reviewer["name"] = name
+            updated_fields.append(f"Name: {name}")
+        if email is not None:
+            # Validate email format
+            if email:  # Only validate if not empty
+                email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+                if not re.match(email_pattern, email):
+                    return {"success": False, "error": "Invalid email format"}
+            reviewer["email"] = email
+            updated_fields.append(f"Email: {email}")
+        if slack_user_id is not None:
+            reviewer["slack_user_id"] = slack_user_id
+            updated_fields.append(f"Slack User ID: {slack_user_id}")
+        if slack_channel_id is not None:
+            reviewer["slack_channel_id"] = slack_channel_id
+            updated_fields.append(f"Slack Channel ID: {slack_channel_id}")
+        if active is not None:
+            reviewer["active"] = active
+            updated_fields.append(f"Active: {active}")
+        
+        if not updated_fields:
+            return {"success": False, "error": "No fields provided to update"}
+        
+        # Save config
+        if not save_videographer_config(config):
+            return {"success": False, "error": "Failed to save configuration"}
+        
+        return {
+            "success": True,
+            "message": f"Updated reviewer information",
+            "updated_fields": updated_fields,
+            "reviewer": reviewer
+        }
+        
+    except Exception as e:
+        logger.error(f"Error editing reviewer: {e}")
+        return {"success": False, "error": str(e)}
+
+async def edit_hod(name: str = None, email: str = None, slack_user_id: str = None, slack_channel_id: str = None, active: bool = None) -> Dict[str, Any]:
+    """Edit the Head of Department's information"""
+    try:
+        config = load_videographer_config()
+        
+        # Initialize HOD if not exists
+        if "hod" not in config:
+            config["hod"] = {
+                "name": "Head of Department",
+                "email": "",
+                "slack_user_id": "",
+                "slack_channel_id": "",
+                "active": True
+            }
+        
+        hod = config["hod"]
+        updated_fields = []
+        
+        # Update provided fields
+        if name is not None:
+            hod["name"] = name
+            updated_fields.append(f"Name: {name}")
+        if email is not None:
+            # Validate email format
+            if email:  # Only validate if not empty
+                email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+                if not re.match(email_pattern, email):
+                    return {"success": False, "error": "Invalid email format"}
+            hod["email"] = email
+            updated_fields.append(f"Email: {email}")
+        if slack_user_id is not None:
+            hod["slack_user_id"] = slack_user_id
+            updated_fields.append(f"Slack User ID: {slack_user_id}")
+        if slack_channel_id is not None:
+            hod["slack_channel_id"] = slack_channel_id
+            updated_fields.append(f"Slack Channel ID: {slack_channel_id}")
+        if active is not None:
+            hod["active"] = active
+            updated_fields.append(f"Active: {active}")
+        
+        if not updated_fields:
+            return {"success": False, "error": "No fields provided to update"}
+        
+        # Save config
+        if not save_videographer_config(config):
+            return {"success": False, "error": "Failed to save configuration"}
+        
+        return {
+            "success": True,
+            "message": f"Updated Head of Department information",
+            "updated_fields": updated_fields,
+            "hod": hod
+        }
+        
+    except Exception as e:
+        logger.error(f"Error editing HOD: {e}")
+        return {"success": False, "error": str(e)}
+
+async def edit_head_of_sales(name: str = None, email: str = None, slack_user_id: str = None, slack_channel_id: str = None, active: bool = None) -> Dict[str, Any]:
+    """Edit the Head of Sales' information"""
+    try:
+        config = load_videographer_config()
+        
+        # Initialize Head of Sales if not exists
+        if "head_of_sales" not in config:
+            config["head_of_sales"] = {
+                "name": "Head of Sales",
+                "email": "",
+                "slack_user_id": "",
+                "slack_channel_id": "",
+                "active": True
+            }
+        
+        hos = config["head_of_sales"]
+        updated_fields = []
+        
+        # Update provided fields
+        if name is not None:
+            hos["name"] = name
+            updated_fields.append(f"Name: {name}")
+        if email is not None:
+            # Validate email format
+            if email:  # Only validate if not empty
+                email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+                if not re.match(email_pattern, email):
+                    return {"success": False, "error": "Invalid email format"}
+            hos["email"] = email
+            updated_fields.append(f"Email: {email}")
+        if slack_user_id is not None:
+            hos["slack_user_id"] = slack_user_id
+            updated_fields.append(f"Slack User ID: {slack_user_id}")
+        if slack_channel_id is not None:
+            hos["slack_channel_id"] = slack_channel_id
+            updated_fields.append(f"Slack Channel ID: {slack_channel_id}")
+        if active is not None:
+            hos["active"] = active
+            updated_fields.append(f"Active: {active}")
+        
+        if not updated_fields:
+            return {"success": False, "error": "No fields provided to update"}
+        
+        # Save config
+        if not save_videographer_config(config):
+            return {"success": False, "error": "Failed to save configuration"}
+        
+        return {
+            "success": True,
+            "message": f"Updated Head of Sales information",
+            "updated_fields": updated_fields,
+            "head_of_sales": hos
+        }
+        
+    except Exception as e:
+        logger.error(f"Error editing Head of Sales: {e}")
+        return {"success": False, "error": str(e)}
+

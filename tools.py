@@ -167,5 +167,53 @@ functions = [
             },
             "required": ["task_number"]
         }
+    },
+    {
+        "type": "function",
+        "name": "edit_reviewer",
+        "description": "Edit the reviewer's information in the system. Only super admins can use this function.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Reviewer's name"},
+                "email": {"type": "string", "description": "Reviewer's email"},
+                "slack_user_id": {"type": "string", "description": "Slack user ID (optional)"},
+                "slack_channel_id": {"type": "string", "description": "Slack channel ID (optional)"},
+                "active": {"type": "boolean", "description": "Whether the reviewer is active (optional)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "type": "function",
+        "name": "edit_hod",
+        "description": "Edit the Head of Department's information in the system. Only super admins can use this function.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "HOD's name"},
+                "email": {"type": "string", "description": "HOD's email"},
+                "slack_user_id": {"type": "string", "description": "Slack user ID (optional)"},
+                "slack_channel_id": {"type": "string", "description": "Slack channel ID (optional)"},
+                "active": {"type": "boolean", "description": "Whether the HOD is active (optional)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "type": "function",
+        "name": "edit_head_of_sales",
+        "description": "Edit the Head of Sales' information in the system. Only super admins can use this function.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Head of Sales' name"},
+                "email": {"type": "string", "description": "Head of Sales' email"},
+                "slack_user_id": {"type": "string", "description": "Slack user ID (optional)"},
+                "slack_channel_id": {"type": "string", "description": "Slack channel ID (optional)"},
+                "active": {"type": "boolean", "description": "Whether the Head of Sales is active (optional)"}
+            },
+            "required": []
+        }
     }
 ]

@@ -9,7 +9,7 @@ from PIL import Image
 from utils import _load_mapping_config, _format_sales_people_hint, _format_locations_hint, _format_videographers_hint, append_to_history, markdown_to_slack
 from db_utils import save_task, check_duplicate_async as check_duplicate_reference, get_task as get_task_by_number, export_data_to_slack as export_current_data, update_task as update_task_by_number, delete_task_by_number
 from history import pending_confirmations, pending_edits, pending_deletes, slash_command_responses, user_history
-from management import add_videographer, remove_videographer, add_location, remove_location, list_videographers, list_locations, add_salesperson, remove_salesperson, list_salespeople, update_person_slack_ids
+from management import add_videographer, remove_videographer, add_location, remove_location, list_videographers, list_locations, add_salesperson, remove_salesperson, list_salespeople, update_person_slack_ids, edit_reviewer, edit_hod, edit_head_of_sales
 import requests
 from datetime import datetime, timedelta
 from simple_permissions import check_permission as simple_check_permission
@@ -1405,6 +1405,102 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                                 answer += f"\n{person_name} is now integrated with Slack and can receive notifications."
                         else:
                             answer = f"❌ Failed to update Slack IDs: {result['error']}"
+            
+            elif func_name == "edit_reviewer":
+                # Check permissions for editing reviewer
+                has_permission, error_msg = simple_check_permission(user_id, "manage_users")
+                if not has_permission:
+                    answer = error_msg
+                else:
+                    result = await edit_reviewer(
+                        name=args.get("name"),
+                        email=args.get("email"),
+                        slack_user_id=args.get("slack_user_id"),
+                        slack_channel_id=args.get("slack_channel_id"),
+                        active=args.get("active")
+                    )
+                    
+                    if result["success"]:
+                        answer = f"✅ {result['message']}\n\n**Updated fields:**\n"
+                        for field in result.get("updated_fields", []):
+                            answer += f"• {field}\n"
+                        
+                        reviewer = result.get("reviewer", {})
+                        answer += "\n**Current reviewer information:**\n"
+                        answer += f"• Name: {reviewer.get('name', 'Not set')}\n"
+                        answer += f"• Email: {reviewer.get('email', 'Not set')}\n"
+                        answer += f"• Status: {'Active' if reviewer.get('active', True) else 'Inactive'}\n"
+                        
+                        if reviewer.get('slack_user_id'):
+                            answer += f"• Slack User ID: `{reviewer.get('slack_user_id')}`\n"
+                        if reviewer.get('slack_channel_id'):
+                            answer += f"• Slack Channel ID: `{reviewer.get('slack_channel_id')}`\n"
+                    else:
+                        answer = f"❌ Failed to update reviewer: {result['error']}"
+            
+            elif func_name == "edit_hod":
+                # Check permissions for editing HOD
+                has_permission, error_msg = simple_check_permission(user_id, "manage_users")
+                if not has_permission:
+                    answer = error_msg
+                else:
+                    result = await edit_hod(
+                        name=args.get("name"),
+                        email=args.get("email"),
+                        slack_user_id=args.get("slack_user_id"),
+                        slack_channel_id=args.get("slack_channel_id"),
+                        active=args.get("active")
+                    )
+                    
+                    if result["success"]:
+                        answer = f"✅ {result['message']}\n\n**Updated fields:**\n"
+                        for field in result.get("updated_fields", []):
+                            answer += f"• {field}\n"
+                        
+                        hod = result.get("hod", {})
+                        answer += "\n**Current HOD information:**\n"
+                        answer += f"• Name: {hod.get('name', 'Not set')}\n"
+                        answer += f"• Email: {hod.get('email', 'Not set')}\n"
+                        answer += f"• Status: {'Active' if hod.get('active', True) else 'Inactive'}\n"
+                        
+                        if hod.get('slack_user_id'):
+                            answer += f"• Slack User ID: `{hod.get('slack_user_id')}`\n"
+                        if hod.get('slack_channel_id'):
+                            answer += f"• Slack Channel ID: `{hod.get('slack_channel_id')}`\n"
+                    else:
+                        answer = f"❌ Failed to update HOD: {result['error']}"
+            
+            elif func_name == "edit_head_of_sales":
+                # Check permissions for editing Head of Sales
+                has_permission, error_msg = simple_check_permission(user_id, "manage_users")
+                if not has_permission:
+                    answer = error_msg
+                else:
+                    result = await edit_head_of_sales(
+                        name=args.get("name"),
+                        email=args.get("email"),
+                        slack_user_id=args.get("slack_user_id"),
+                        slack_channel_id=args.get("slack_channel_id"),
+                        active=args.get("active")
+                    )
+                    
+                    if result["success"]:
+                        answer = f"✅ {result['message']}\n\n**Updated fields:**\n"
+                        for field in result.get("updated_fields", []):
+                            answer += f"• {field}\n"
+                        
+                        hos = result.get("head_of_sales", {})
+                        answer += "\n**Current Head of Sales information:**\n"
+                        answer += f"• Name: {hos.get('name', 'Not set')}\n"
+                        answer += f"• Email: {hos.get('email', 'Not set')}\n"
+                        answer += f"• Status: {'Active' if hos.get('active', True) else 'Inactive'}\n"
+                        
+                        if hos.get('slack_user_id'):
+                            answer += f"• Slack User ID: `{hos.get('slack_user_id')}`\n"
+                        if hos.get('slack_channel_id'):
+                            answer += f"• Slack Channel ID: `{hos.get('slack_channel_id')}`\n"
+                    else:
+                        answer = f"❌ Failed to update Head of Sales: {result['error']}"
             
             elif func_name == "delete_task":
                 # Check permissions for deleting tasks

@@ -56,17 +56,26 @@ DROPBOX_FOLDERS = {
     "returned": "/Site Videos/Returned"
 }
 
-# Rejection categories
-REJECTION_CATEGORIES = [
-    "Previous Artwork is Visible",
-    "Competitor Billboard Visible", 
-    "Artwork Color is Incorrect",
-    "Artwork Order is Incorrect",
-    "Environment Too Dark",
-    "Ghost Effect",
-    "Lighting of the cladding",
-    "Other"
-]
+# Rejection categories with descriptions
+REJECTION_CATEGORIES_WITH_DESCRIPTIONS = {
+    "Previous Artwork is Visible": "When mocked up, the previous artwork is still visible from the sides, or the lights from it.",
+    "Competitor Billboard Visible": "A competing advertiser's billboard is in the frame.",
+    "Artwork Color is Incorrect": "The colour of the artwork appears different from the actual artwork itself & proof of play.",
+    "Artwork Order is Incorrect": "The mocked up sequence of creatives plays in the wrong order, needs to be the same as proof of play.",
+    "Environment Too Dark": "The scene lacks adequate lighting, causing the billboard and surroundings to appear dark. (Night)",
+    "Environment Too Bright": "Excessive brightness or glare washes out the creative, reducing legibility. (Day)",
+    "Blurry Artwork": "The billboard content appears out of focus in the video, impairing readability.",
+    "Ghost Effect": "The cladding, when mocked up looks like cars going through it/lampposts when removed, can makes car disappear when passing through them.",
+    "Cladding Lighting": "The external lighting on the billboard frame or cladding is dull/not accurate or off.",
+    "Shaking Artwork or Cladding": "Structural vibration or instability results in a visibly shaky frame or creative playback.",
+    "Shooting Angle": "The chosen camera angle distorts the artwork or makes it smaller (Billboard).",
+    "Visible Strange Elements": "Unintended objects, example when mocked up cladding appearing in a different frame, artwork not going away on time etc.",
+    "Transition Overlayer": "Video captures unintended transition animations or overlays, obscuring the main creative.",
+    "Other": "Other reasons not covered by the above categories."
+}
+
+# Extract just the category names for the list
+REJECTION_CATEGORIES = list(REJECTION_CATEGORIES_WITH_DESCRIPTIONS.keys())
 
 # Approval tracking (in-memory for now, could be moved to a database)
 pending_approvals = {}  # message_ts -> approval_data
@@ -83,18 +92,16 @@ async def classify_rejection_reason(comments: str) -> str:
         from openai import OpenAI
         client = OpenAI(api_key=OPENAI_API_KEY)
         
-        # Create the classification prompt
+        # Create the classification prompt with descriptions
+        categories_list = "\n".join([
+            f"- {category}: {description}"
+            for category, description in REJECTION_CATEGORIES_WITH_DESCRIPTIONS.items()
+        ])
+        
         prompt = f"""Classify the following video rejection comment into EXACTLY one of these categories:
         
 Categories:
-- Previous Artwork is Visible
-- Competitor Billboard Visible
-- Artwork Color is Incorrect
-- Artwork Order is Incorrect
-- Environment Too Dark
-- Ghost Effect
-- Lighting of the cladding
-- Other
+{categories_list}
 
 Comment: "{comments}"
 
