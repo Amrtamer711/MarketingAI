@@ -27,7 +27,7 @@ STRICT MAPPING RULES (REQUIRED for updates):
   
 - Location MUST be one of: {list(_load_mapping_config().get('location_mappings', {}).keys())}
   Valid locations: {_format_locations_hint(_load_mapping_config())}
-  Apply intelligent mapping: "TTC" → "TTC Dubai", "Oryx" → "The Oryx", "Gateway" → "The Gateway Dubai", "04" → "UAE 04"
+  Apply intelligent mapping: "TTC" → "TTC Dubai", "Triple Crown" or "The Triple Crown Dubai" → "TTC Dubai", "Oryx" → "The Oryx", "Gateway" → "The Gateway Dubai", "04" → "UAE 04"
   
 - Videographer MUST be one of: {list(_load_mapping_config().get('videographers', {}).keys())}
   Apply fuzzy matching: "James" → "James Sevillano", "Jason" → "Jason Pieterse", "Cesar" → "Cesar Sierra", "Amr" → "Amr Tamer"
@@ -161,6 +161,7 @@ STRICT MAPPING RULES (REQUIRED):
    - Valid locations: {_format_locations_hint(_load_mapping_config())}
    - Common mappings to apply:
      * "TTC" → "TTC Dubai"
+     * "Triple Crown" or "The Triple Crown Dubai" → "TTC Dubai"
      * "Oryx" → "The Oryx"
      * "Gateway" → "The Gateway Dubai"
      * "04" or "UAE04" → "UAE 04"

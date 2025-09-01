@@ -78,7 +78,7 @@ services:
       import json
       import sys
       
-      url = 'https://videocritique-bot.onrender.com/internal/run-assignment'
+      url = 'https://videocritique-bot-ob8k.onrender.com/internal/run-assignment'
       print(f'Calling assignment endpoint: {url}')
       
       try:

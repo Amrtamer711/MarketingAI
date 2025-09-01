@@ -148,7 +148,7 @@ async def parse_image_with_ai(file_info: Dict[str, Any], text: str = "") -> Dict
             f"   Common: 'Nour'→'Nourhan', 'N'→'Nourhan'\n"
             f"2. location MUST be mapped to one of: {list(mapping_cfg.get('location_mappings', {}).keys())}\n"
             f"   Valid locations: {_format_locations_hint(mapping_cfg)}\n"
-            f"   Auto-map: 'TTC'→'TTC Dubai', 'Oryx'→'The Oryx', 'Gateway'→'The Gateway Dubai', '04'→'UAE 04'\n"
+            f"   Auto-map: 'TTC' or 'Triple Crown' or 'The Triple Crown Dubai'→'TTC Dubai', 'Oryx'→'The Oryx', 'Gateway'→'The Gateway Dubai', '04'→'UAE 04'\n"
             "3. If you cannot map to a valid value, extract the raw text as-is (it will be validated later)\n"
             "ALWAYS attempt to map to the correct valid value when you recognize it."
         )
@@ -325,7 +325,7 @@ CRITICAL VALIDATION RULES - YOU MUST ENFORCE:
 
 2. Location - ONLY accept these exact values: {list(mapping_cfg.get('location_mappings', {}).keys())}
    Valid: {_format_locations_hint(mapping_cfg)}
-   Auto-map: "TTC"→"TTC Dubai", "Oryx"→"The Oryx", "Gateway"→"The Gateway Dubai", "04"→"UAE 04"
+   Auto-map: "TTC" or "Triple Crown" or "The Triple Crown Dubai"→"TTC Dubai", "Oryx"→"The Oryx", "Gateway"→"The Gateway Dubai", "04"→"UAE 04"
    If invalid: keep current value, tell user valid options
 
 3. Videographer - ONLY accept these exact values: {list(mapping_cfg.get('videographers', {}).keys())}
@@ -588,7 +588,7 @@ async def handle_confirmation_response(channel: str, user_id: str, user_input: s
             f"- sales_person MUST be one of: {list(mapping_cfg.get('sales_people', {}).keys())}\n"
             f"  Auto-map: {_format_sales_people_hint(mapping_cfg)}, 'Nour'→'Nourhan'\n"
             f"- location MUST be one of: {list(mapping_cfg.get('location_mappings', {}).keys())}\n"
-            f"  Auto-map: 'TTC'→'TTC Dubai', 'Oryx'→'The Oryx', 'Gateway'→'The Gateway Dubai', '04'→'UAE 04'\n"
+            f"  Auto-map: 'TTC' or 'Triple Crown' or 'The Triple Crown Dubai'→'TTC Dubai', 'Oryx'→'The Oryx', 'Gateway'→'The Gateway Dubai', '04'→'UAE 04'\n"
             "If user provides invalid values after mapping, do NOT include them in fields.\n"
             "In your message, explain which fields couldn't be updated and list valid options.\n"
             "IMPORTANT: Use natural language in your messages - say 'Sales Person' not 'sales_person', 'Location' not 'location'.\n"
