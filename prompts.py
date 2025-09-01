@@ -52,9 +52,9 @@ IMPORTANT: You must return ALL fields in the JSON response:
 - Never use 'N/A' - if a field shows 'N/A' above, return an empty string ""
 
 DATE VALIDATION RULES:
-- Campaign Start Date must be in the present orfuture (today: {datetime.now(UAE_TZ).strftime('%d-%m-%Y')} or after)
+- Campaign Start Date must be today or in the future (today: {datetime.now(UAE_TZ).strftime('%d-%m-%Y')} or after)
 - Campaign End Date must be after or equal to Campaign Start Date
-- Campaign End Date must be in the future
+- Campaign End Date must be today or in the future
 - Filming Date (if changed) must be:
   - After or equal to Campaign Start Date
   - Before or equal to Campaign End Date
@@ -133,10 +133,10 @@ If the user mentions dates like "today", "tomorrow", or weekdays without specifi
 IMPORTANT VALIDATION RULES:
 1. Campaign End Date Validation: ALWAYS reject any campaign where the end date has already passed (before today's date: {today_str}). 
    Tell the user: "Campaign end date has already passed. Please update the campaign dates before proceeding."
-2. Campaign Start Date Validation: ALWAYS reject any campaign that has already started (start date before today's date: {today_str}).
-   Tell the user: "Campaign has already started. We cannot process requests for campaigns that have already begun."
+2. Campaign Start Date Validation: Campaigns can start today or in the future. Reject only if the start date is before today's date: {today_str}.
+   Tell the user: "Campaign start date cannot be in the past. Please use today's date or a future date."
 3. Campaign dates must be logical: start date should be before or equal to end date.
-4. Both start and end dates must be in the present or the future (after or including today: {today_str}).
+4. Both start and end dates must be today or in the future (including today: {today_str}).
 
 When a user wants to log a design request, they can:
 - Paste an email with the request details
