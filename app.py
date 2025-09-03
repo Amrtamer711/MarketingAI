@@ -987,7 +987,7 @@ async def dashboard():
                 <div class=\"text-2xl font-bold mt-1\">${summary.uploads||0}</div>
               </div>
               <div class=\"text-center p-3 border border-gray-700 rounded bg-black/30\">
-                <div class=\"text-gray-400 text-sm\">Pending Videos</div>
+                <div class=\"text-gray-400 text-sm\">Currently Pending</div>
                 <div class=\"text-2xl font-bold mt-1\">${summary.pending||0}</div>
               </div>
               <div class=\"text-center p-3 border border-gray-700 rounded bg-black/30\">
@@ -995,7 +995,7 @@ async def dashboard():
                 <div class=\"text-2xl font-bold mt-1\">${summary.rejected||0}</div>
               </div>
               <div class=\"text-center p-3 border border-gray-700 rounded bg-black/30\">
-                <div class=\"text-gray-400 text-sm\">Submitted to Sales</div>
+                <div class=\"text-gray-400 text-sm\">Currently In Sales</div>
                 <div class=\"text-2xl font-bold mt-1\">${summary.submitted_to_sales||0}</div>
               </div>
               <div class=\"text-center p-3 border border-gray-700 rounded bg-black/30\">
@@ -1025,10 +1025,10 @@ async def dashboard():
             <div class=\"grid grid-cols-1 md:grid-cols-3 gap-4\">
               <div class=\"text-center p-3 border border-gray-700 rounded bg-black/30\">
                 <div class=\"text-gray-400 text-sm\">Avg Response Time</div>
-                <div class=\"text-2xl font-bold mt-1\">${reviewer.avg_response_display || (reviewer.avg_response_hours ? reviewer.avg_response_hours + ' hrs' : '0 hrs')}</div>
+                <div class=\"text-2xl font-bold mt-1\">${reviewer.avg_response_display || (reviewer.avg_response_hours ? reviewer.avg_response_hours + ' hrs' : '-')}</div>
               </div>
               <div class=\"text-center p-3 border border-gray-700 rounded bg-black/30\">
-                <div class=\"text-gray-400 text-sm\">Pending Videos</div>
+                <div class=\"text-gray-400 text-sm\">Currently Pending</div>
                 <div class=\"text-2xl font-bold mt-1\">${reviewer.pending_videos||0}</div>
               </div>
               <div class=\"text-center p-3 border border-gray-700 rounded bg-black/30\">
@@ -1053,34 +1053,38 @@ async def dashboard():
             wrap.innerHTML = `
               <div class=\"mb-4\">
                 <div class=\"text-lg font-medium mb-3\">${v}</div>
-                <div class=\"grid grid-cols-2 md:grid-cols-7 gap-3\">
+                <div class=\"grid grid-cols-2 md:grid-cols-8 gap-2\">
                   <div class=\"text-center p-2 border border-gray-700 rounded bg-black/30\">
                     <div class=\"text-gray-400 text-xs\">Total Tasks</div>
-                    <div class=\"text-xl font-bold mt-1\">${stats.total||0}</div>
+                    <div class=\"text-lg font-bold mt-1\">${stats.total||0}</div>
                   </div>
                   <div class=\"text-center p-2 border border-gray-700 rounded bg-black/30\">
                     <div class=\"text-gray-400 text-xs\">Uploads</div>
-                    <div class=\"text-xl font-bold mt-1\">${stats.uploads||0}</div>
+                    <div class=\"text-lg font-bold mt-1\">${stats.uploads||0}</div>
                   </div>
                   <div class=\"text-center p-2 border border-gray-700 rounded bg-black/30\">
-                    <div class=\"text-gray-400 text-xs\">Pending</div>
-                    <div class=\"text-xl font-bold mt-1\">${stats.pending||0}</div>
+                    <div class=\"text-gray-400 text-xs\">Currently Pending</div>
+                    <div class=\"text-lg font-bold mt-1\">${stats.pending||0}</div>
                   </div>
                   <div class=\"text-center p-2 border border-gray-700 rounded bg-black/30\">
                     <div class=\"text-gray-400 text-xs\">Rejected</div>
-                    <div class=\"text-xl font-bold mt-1\">${stats.rejected||0}</div>
+                    <div class=\"text-lg font-bold mt-1\">${stats.rejected||0}</div>
                   </div>
                   <div class=\"text-center p-2 border border-gray-700 rounded bg-black/30\">
-                    <div class=\"text-gray-400 text-xs\">In Sales</div>
-                    <div class=\"text-xl font-bold mt-1\">${stats.submitted_to_sales||0}</div>
+                    <div class=\"text-gray-400 text-xs\">Currently In Sales</div>
+                    <div class=\"text-lg font-bold mt-1\">${stats.submitted_to_sales||0}</div>
+                  </div>
+                  <div class=\"text-center p-2 border border-gray-700 rounded bg-black/30\">
+                    <div class=\"text-gray-400 text-xs\">Returned</div>
+                    <div class=\"text-lg font-bold mt-1\">${stats.returned||0}</div>
                   </div>
                   <div class=\"text-center p-2 border border-gray-700 rounded bg-black/30\">
                     <div class=\"text-gray-400 text-xs\">Accepted</div>
-                    <div class=\"text-xl font-bold mt-1\">${stats.accepted_videos||0}</div>
+                    <div class=\"text-lg font-bold mt-1\">${stats.accepted_videos||0}</div>
                   </div>
                   <div class=\"text-center p-2 border border-gray-700 rounded bg-success/20\">
                     <div class=\"text-gray-400 text-xs\">Success Rate</div>
-                    <div class=\"text-xl font-bold mt-1 text-green-400\">${stats.accepted_pct||0}%</div>
+                    <div class=\"text-lg font-bold mt-1 text-green-400\">${stats.accepted_pct||0}%</div>
                   </div>
                 </div>
               </div>`;
