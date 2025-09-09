@@ -283,7 +283,7 @@ async def slack_slash_commands(request: Request):
                        "• `/help_design` - Show this help menu\n"
                        "• `/log_campaign` - Learn how to log design requests\n"
                        "• `/recent_requests` - Learn how to view recent requests\n"
-                       "• `/my_ids` - Show your Slack user and channel IDs\n\n"
+                       "• `/design_my_ids` - Show your Slack user and channel IDs\n\n"
                        "*How to Use This Bot:*\n"
                        "⚠️ **Important**: Slash commands are for documentation only!\n"
                        "To actually perform actions, send me regular messages:\n\n"
@@ -304,7 +304,7 @@ async def slack_slash_commands(request: Request):
             "text": help_message
         })
     
-    elif command == "/my_ids":
+    elif command == "/design_my_ids":
         # Get user info
         try:
             user_info = await slack_client.users_info(user=user_id)

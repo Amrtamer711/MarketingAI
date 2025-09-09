@@ -6,7 +6,7 @@ Only admins (Head of Department and Reviewer) can add, update, or remove people 
 ## Workflow Process
 
 ### For New Users:
-1. **User runs `/my_ids` command** - This shows their Slack information in a copyable format
+1. **User runs `/design_my_ids` command** - This shows their Slack information in a copyable format
 2. **User copies their information** and sends it to an admin
 3. **Admin updates the system** using the bot's tools
 
@@ -23,7 +23,7 @@ Only admins (Head of Department and Reviewer) can add, update, or remove people 
 ```
 
 #### Updating Slack IDs:
-When someone sends you their IDs from `/my_ids`, you can update them:
+When someone sends you their IDs from `/design_my_ids`, you can update them:
 ```
 "Update Slack IDs for videographer John Doe: user ID U1234567890, channel ID C0987654321"
 "Update Slack IDs for salesperson Jane Smith: user ID U9876543210"
@@ -35,7 +35,7 @@ When someone sends you their IDs from `/my_ids`, you can update them:
 - **EDIT_PERMISSIONS**: Can edit existing tasks
 - **ADMIN_PERMISSIONS**: Can manage people and update Slack IDs (restricted to Head of Department and Reviewer)
 
-## Example `/my_ids` Output
+## Example `/design_my_ids` Output
 ```
 🆔 Your Slack Information
 

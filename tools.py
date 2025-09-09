@@ -131,7 +131,7 @@ functions = [
     {
         "type": "function",
         "name": "update_person_slack_ids",
-        "description": "Update Slack user ID and/or channel ID for a person in the system. Use this when someone provides their Slack IDs after using /my_ids command.",
+        "description": "Update Slack user ID and/or channel ID for a person in the system. Use this when someone provides their Slack IDs after using /design_my_ids command.",
         "parameters": {
             "type": "object",
             "properties": {
