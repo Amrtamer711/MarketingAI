@@ -34,7 +34,7 @@ def init_db() -> None:
                     "Brand" TEXT,
                     "Campaign Start Date" TEXT,
                     "Campaign End Date" TEXT,
-                    "Reference Number" TEXT UNIQUE,
+                    "Reference Number" TEXT,
                     "Location" TEXT,
                     "Sales Person" TEXT,
                     "Submitted By" TEXT,
@@ -292,7 +292,7 @@ def check_duplicate_reference(reference_number: str) -> Dict[str, Any]:
     try:
         with _connect() as conn:
             conn.row_factory = sqlite3.Row
-            live = conn.execute(f"SELECT * FROM {LIVE_TABLE} WHERE 'Reference Number'=?", (clean_ref,)).fetchone()
+            live = conn.execute(f'SELECT * FROM {LIVE_TABLE} WHERE "Reference Number"=?', (clean_ref,)).fetchone()
             if live:
                 return {"is_duplicate": True, "existing_entry": {
                     "task_number": str(live["task_number"]),
