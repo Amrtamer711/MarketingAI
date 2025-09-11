@@ -446,32 +446,34 @@ async def export_data_to_slack(include_history: bool = True, channel: str = None
         logger.error(f"Error exporting live tasks: {e}")
         response += f"❌ Error exporting live tasks: {str(e)}\n"
     
-    # Send History DB file if requested
+    # Send complete database file if requested (includes both live and completed tasks)
     if include_history:
         try:
             if os.path.exists(HISTORY_DB_PATH):
                 with _connect() as conn:
                     cursor = conn.execute("SELECT COUNT(*) FROM completed_tasks")
                     history_count = cursor.fetchone()[0]
+                    cursor = conn.execute(f"SELECT COUNT(*) FROM {LIVE_TABLE}")
+                    live_in_db_count = cursor.fetchone()[0]
                 with open(HISTORY_DB_PATH, 'rb') as f:
-                    filename_db = f"history_logs_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.db"
+                    filename_db = f"complete_database_{datetime.now(UAE_TZ).strftime('%Y%m%d_%H%M%S')}.db"
                     result = await slack_client.files_upload_v2(
                         channel=channel,
                         file=f,
                         filename=filename_db,
                         title=filename_db,
-                        initial_comment=f"✅ History database with {history_count} completed tasks"
+                        initial_comment=f"🗄️ Complete database with {live_in_db_count} live tasks and {history_count} completed tasks"
                     )
                 if result.get('ok'):
-                    files_sent.append("History DB")
-                    response += f"✅ History database sent ({history_count} completed tasks)\n"
+                    files_sent.append("Complete Database")
+                    response += f"✅ Complete database sent ({live_in_db_count} live tasks, {history_count} completed tasks)\n"
                 else:
-                    response += f"❌ Failed to send history database: {result.get('error', 'Unknown error')}\n"
+                    response += f"❌ Failed to send complete database: {result.get('error', 'Unknown error')}\n"
             else:
-                response += "⚠️ History database not found\n"
+                response += "⚠️ Database file not found\n"
         except Exception as e:
-            logger.error(f"Error sending history database: {e}")
-            response += f"❌ Error sending history database: {str(e)}\n"
+            logger.error(f"Error sending complete database: {e}")
+            response += f"❌ Error sending complete database: {str(e)}\n"
     
     response += "\n" + "=" * 50 + "\n"
     if files_sent:
