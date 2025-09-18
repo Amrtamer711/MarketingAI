@@ -2427,8 +2427,8 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
         videos_to_reject = []
         workflows_to_cancel = []
         
-        # Search all folders except accepted
-        folders_to_search = ["pending", "submitted", "returned", "raw"]
+        # Search only folders in active pipeline (not rejected/returned)
+        folders_to_search = ["pending", "submitted"]
         
         for folder_name in folders_to_search:
             folder_path = DROPBOX_FOLDERS.get(folder_name)
@@ -2488,6 +2488,16 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                 dropbox_manager.dbx.files_move_v2(video['path'], to_path)
                 
                 logger.info(f"Moved {video['filename']} from {video['folder']} to rejected")
+                
+                # Update database status to Rejected
+                await update_excel_status(
+                    task_number, 
+                    "Rejected", 
+                    version=video['version'],
+                    rejection_reason=f"Auto-rejected: Version {accepted_version} was accepted",
+                    rejection_class="Other Version Accepted",
+                    rejected_by="System"
+                )
                 
                 # Find and cancel any active workflows for this video
                 for workflow_id, workflow in list(approval_workflows.items()):
@@ -2597,8 +2607,8 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                                 "type": "section",
                                 "text": {
                                     "type": "mrkdwn",
-                                    "text": f"ℹ️ *Videos Auto-Rejected*\n\nTask #{task_number} - Version {accepted_version} has been accepted.\n\nThe following videos were automatically moved to rejected:\n" + 
-                                           "\n".join([f"• `{v['filename']}` (v{v['version']})" for v in videographer_videos])
+                                    "text": f"ℹ️ *Videos Auto-Rejected*\n\nTask #{task_number} - Version {accepted_version} has been accepted.\n\nThe following videos in the approval pipeline were automatically moved to rejected:\n" + 
+                                           "\n".join([f"• `{v['filename']}` (v{v['version']}) from {v['folder']}" for v in videographer_videos])
                                 }
                             }]
                         )
