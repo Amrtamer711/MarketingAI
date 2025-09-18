@@ -741,8 +741,10 @@ async def update_task(task_number: int, updates: Dict[str, Any], current_data: D
                 trello_updates['assignee'] = updates['Videographer']
             if 'Status' in updates and updates['Status'] != current_data.get('Status'):
                 trello_updates_needed = True
-                new_assignee = updates['Status'].replace('Assigned to ', '')
-                trello_updates['assignee'] = new_assignee
+                # Only extract assignee if the new status is "Assigned to X"
+                if updates['Status'].startswith('Assigned to'):
+                    new_assignee = updates['Status'].replace('Assigned to ', '')
+                    trello_updates['assignee'] = new_assignee
             if 'Filming Date' in updates and updates['Filming Date'] != current_data.get('Filming Date'):
                 trello_updates_needed = True
                 try:
