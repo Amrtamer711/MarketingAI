@@ -77,9 +77,28 @@ REJECTION_CATEGORIES_WITH_DESCRIPTIONS = {
 # Extract just the category names for the list
 REJECTION_CATEGORIES = list(REJECTION_CATEGORIES_WITH_DESCRIPTIONS.keys())
 
-# Approval tracking (in-memory for now, could be moved to a database)
+# Import database functions for workflow persistence
+from db_utils import (
+    save_workflow_async, get_workflow_async, delete_workflow_async,
+    get_all_pending_workflows_async
+)
+
+# Approval tracking - workflows persist in database, pending_approvals still in-memory
 pending_approvals = {}  # message_ts -> approval_data
-approval_workflows = {}  # workflow_id -> workflow_data
+approval_workflows = {}  # workflow_id -> workflow_data (cache for active workflows)
+
+async def get_workflow_with_cache(workflow_id: str) -> Optional[Dict[str, Any]]:
+    """Get workflow from cache or database"""
+    # Check cache first
+    if workflow_id in approval_workflows:
+        return approval_workflows[workflow_id]
+    
+    # Load from database
+    workflow = await get_workflow_async(workflow_id)
+    if workflow:
+        # Cache it
+        approval_workflows[workflow_id] = workflow
+    return workflow
 
 async def classify_rejection_reason(comments: str) -> str:
     """Use OpenAI to classify rejection comments into predefined categories"""
@@ -1430,16 +1449,21 @@ async def send_video_to_reviewer(task_number: int, filename: str, dropbox_path: 
         version = int(version_match.group(1)) if version_match else 1
         
         # Store workflow data
-        approval_workflows[workflow_id] = {
+        workflow_data = {
             "task_number": task_number,
             "filename": filename,
             "dropbox_path": dropbox_path,
             "videographer_id": videographer_id,
             "task_data": task_data,
             "stage": "reviewer",
-            "created_at": datetime.now(UAE_TZ),
-            "version": version
+            "created_at": datetime.now(UAE_TZ).isoformat(),
+            "version": version,
+            "status": "pending"
         }
+        
+        # Save to database and cache
+        approval_workflows[workflow_id] = workflow_data
+        await save_workflow_async(workflow_id, workflow_data)
         
         # Build message blocks
         blocks = [
@@ -1514,11 +1538,16 @@ async def send_video_to_reviewer(task_number: int, filename: str, dropbox_path: 
         })
         
         # Send message with buttons
-        await slack_client.chat_postMessage(
+        result = await slack_client.chat_postMessage(
             channel=reviewer_channel,
             text=f"🎥 New video for review",
             blocks=blocks
         )
+        
+        # Save message timestamp for recovery
+        workflow_data['reviewer_msg_ts'] = result['ts']
+        approval_workflows[workflow_id] = workflow_data
+        await save_workflow_async(workflow_id, workflow_data)
         
     except Exception as e:
         logger.error(f"Error sending to reviewer: {e}")
@@ -1534,7 +1563,7 @@ async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url:
                 "text": error_msg
             })
             return
-        workflow = approval_workflows.get(workflow_id)
+        workflow = await get_workflow_with_cache(workflow_id)
         if not workflow:
             return
         
@@ -1579,8 +1608,11 @@ async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url:
             workflow['reviewer_approved_by'] = user_id
             workflow['reviewer_approved_at'] = datetime.now(UAE_TZ).isoformat()
             
+            # Save workflow to database
+            await save_workflow_async(workflow_id, workflow)
+            
             # Send to Head of Sales
-            await slack_client.chat_postMessage(
+            hos_result = await slack_client.chat_postMessage(
                 channel=hos_channel,
                 text=f"🎥 New video for final approval",
                 blocks=[
@@ -1639,6 +1671,12 @@ async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url:
                     }
                 ]
             )
+            
+            # Save HoS message timestamp
+            workflow['hos_msg_ts'] = hos_result['ts']
+            workflow['hos_id'] = hos_channel
+            await save_workflow_async(workflow_id, workflow)
+            
         else:
             logger.error("Head of Sales channel not configured")
         
@@ -1679,7 +1717,7 @@ async def handle_reviewer_rejection(workflow_id: str, user_id: str, response_url
                 "text": error_msg
             })
             return
-        workflow = approval_workflows.get(workflow_id)
+        workflow = await get_workflow_with_cache(workflow_id)
         if not workflow:
             return
         
@@ -1797,8 +1835,10 @@ async def handle_reviewer_rejection(workflow_id: str, user_id: str, response_url
             "blocks": reviewer_update_blocks
         })
         
-        # Clean up workflow
-        del approval_workflows[workflow_id]
+        # Clean up workflow from cache and database
+        if workflow_id in approval_workflows:
+            del approval_workflows[workflow_id]
+        await delete_workflow_async(workflow_id)
         
     except Exception as e:
         logger.error(f"Error handling reviewer rejection: {e}")
@@ -1806,7 +1846,7 @@ async def handle_reviewer_rejection(workflow_id: str, user_id: str, response_url
 async def handle_sales_approval(workflow_id: str, user_id: str, response_url: str):
     """Handle sales approval - now sends to Head of Sales for final approval"""
     try:
-        workflow = approval_workflows.get(workflow_id)
+        workflow = await get_workflow_with_cache(workflow_id)
         if not workflow:
             return
         
@@ -1927,7 +1967,7 @@ async def handle_sales_approval(workflow_id: str, user_id: str, response_url: st
 async def handle_sales_rejection(workflow_id: str, user_id: str, response_url: str, rejection_comments: Optional[str] = None):
     """Handle sales rejection - move to returned and notify"""
     try:
-        workflow = approval_workflows.get(workflow_id)
+        workflow = await get_workflow_with_cache(workflow_id)
         if not workflow:
             return
         
@@ -2076,8 +2116,10 @@ async def handle_sales_rejection(workflow_id: str, user_id: str, response_url: s
             ]
         })
         
-        # Clean up workflow
-        del approval_workflows[workflow_id]
+        # Clean up workflow from cache and database
+        if workflow_id in approval_workflows:
+            del approval_workflows[workflow_id]
+        await delete_workflow_async(workflow_id)
         
     except Exception as e:
         logger.error(f"Error handling sales rejection: {e}")
@@ -2120,7 +2162,7 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
                 "text": error_msg
             })
             return
-        workflow = approval_workflows.get(workflow_id)
+        workflow = await get_workflow_with_cache(workflow_id)
         if not workflow:
             return
         
@@ -2207,8 +2249,10 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
             "text": f"✅ Video accepted and all parties notified\nTask #{task_number}: `{filename}`"
         })
         
-        # Clean up workflow
-        del approval_workflows[workflow_id]
+        # Clean up workflow from cache and database
+        if workflow_id in approval_workflows:
+            del approval_workflows[workflow_id]
+        await delete_workflow_async(workflow_id)
         
     except Exception as e:
         logger.error(f"Error handling HoS approval: {e}")
@@ -2224,7 +2268,7 @@ async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str
                 "text": error_msg
             })
             return
-        workflow = approval_workflows.get(workflow_id)
+        workflow = await get_workflow_with_cache(workflow_id)
         if not workflow:
             return
         
@@ -2361,8 +2405,41 @@ async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str
             "text": f"❌ Video rejected and returned\nTask #{task_number}: `{filename}`\n*Category:* {rejection_class}\nAll parties have been notified."
         })
         
-        # Clean up workflow
-        del approval_workflows[workflow_id]
+        # Clean up workflow from cache and database
+        if workflow_id in approval_workflows:
+            del approval_workflows[workflow_id]
+        await delete_workflow_async(workflow_id)
         
     except Exception as e:
         logger.error(f"Error handling HoS rejection: {e}")
+
+
+async def recover_pending_workflows():
+    """Recover pending workflows from database on startup"""
+    try:
+        logger.info("Recovering pending approval workflows from database...")
+        
+        # Get all pending workflows from database
+        pending_workflows = await get_all_pending_workflows_async()
+        
+        if not pending_workflows:
+            logger.info("No pending workflows found to recover")
+            return
+        
+        logger.info(f"Found {len(pending_workflows)} pending workflows to recover")
+        
+        # Restore to cache silently
+        for workflow in pending_workflows:
+            workflow_id = workflow.get('workflow_id')
+            task_number = workflow.get('task_number')
+            stage = workflow.get('stage', 'reviewer')
+            
+            # Restore to cache
+            approval_workflows[workflow_id] = workflow
+            
+            logger.info(f"Recovered workflow {workflow_id} - Task #{task_number} - Stage: {stage}")
+        
+        logger.info(f"Successfully recovered {len(pending_workflows)} workflows")
+        
+    except Exception as e:
+        logger.error(f"Error recovering pending workflows: {e}")

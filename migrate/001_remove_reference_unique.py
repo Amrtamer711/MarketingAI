@@ -14,10 +14,12 @@ import sys
 import shutil
 from datetime import datetime
 
-# Add parent directory to path to import config
+# Add parent directory to path to import logger
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import HISTORY_DB_PATH
 from logger import logger
+
+# Use local history_logs.db in the migrate directory
+HISTORY_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history_logs.db")
 
 def backup_database():
     """Create a backup of the database before migration."""

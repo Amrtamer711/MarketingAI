@@ -75,6 +75,27 @@ def init_db() -> None:
                     completed_at TEXT
                 );
             """)
+            # Create approval workflows table for persistence across restarts
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS approval_workflows (
+                    workflow_id TEXT PRIMARY KEY,
+                    task_number INTEGER,
+                    filename TEXT,
+                    dropbox_path TEXT,
+                    videographer_id TEXT,
+                    task_data TEXT,
+                    version_info TEXT,
+                    reviewer_id TEXT,
+                    reviewer_msg_ts TEXT,
+                    hos_id TEXT,
+                    hos_msg_ts TEXT,
+                    reviewer_approved INTEGER DEFAULT 0,
+                    hos_approved INTEGER DEFAULT 0,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    status TEXT DEFAULT 'pending'
+                );
+            """)
             # Seed sequence so live task_number keeps increasing beyond history
             try:
                 cur = conn.execute(f"SELECT COALESCE(MAX(task_number), 0) FROM {LIVE_TABLE}")
@@ -524,6 +545,144 @@ async def get_task(task_number: int) -> Dict[str, Any]:
 async def get_next_task_number_async() -> int:
     """Get the next available task number."""
     return get_next_task_number()
+
+
+# ========== APPROVAL WORKFLOW PERSISTENCE ==========
+
+def save_workflow(workflow_id: str, workflow_data: Dict[str, Any]) -> bool:
+    """Save approval workflow to database"""
+    try:
+        with _connect() as conn:
+            # Serialize complex data as JSON
+            task_data_json = json.dumps(workflow_data.get('task_data', {}))
+            version_info_json = json.dumps(workflow_data.get('version_info', {}))
+            
+            conn.execute("""
+                INSERT OR REPLACE INTO approval_workflows 
+                (workflow_id, task_number, filename, dropbox_path, videographer_id, 
+                 task_data, version_info, reviewer_id, reviewer_msg_ts, hos_id, 
+                 hos_msg_ts, reviewer_approved, hos_approved, created_at, updated_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                workflow_id,
+                workflow_data.get('task_number'),
+                workflow_data.get('filename'),
+                workflow_data.get('dropbox_path'),
+                workflow_data.get('videographer_id'),
+                task_data_json,
+                version_info_json,
+                workflow_data.get('reviewer_id'),
+                workflow_data.get('reviewer_msg_ts'),
+                workflow_data.get('hos_id'),
+                workflow_data.get('hos_msg_ts'),
+                1 if workflow_data.get('reviewer_approved') else 0,
+                1 if workflow_data.get('hos_approved') else 0,
+                workflow_data.get('created_at', datetime.now(UAE_TZ).isoformat()),
+                datetime.now(UAE_TZ).isoformat(),
+                workflow_data.get('status', 'pending')
+            ))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error saving workflow {workflow_id}: {e}")
+        return False
+
+
+def get_workflow(workflow_id: str) -> Optional[Dict[str, Any]]:
+    """Get approval workflow from database"""
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                SELECT * FROM approval_workflows WHERE workflow_id = ?
+            """, (workflow_id,)).fetchone()
+            
+            if not row:
+                return None
+            
+            # Convert row to dict
+            columns = [desc[0] for desc in conn.description]
+            workflow = dict(zip(columns, row))
+            
+            # Deserialize JSON fields
+            if workflow.get('task_data'):
+                workflow['task_data'] = json.loads(workflow['task_data'])
+            if workflow.get('version_info'):
+                workflow['version_info'] = json.loads(workflow['version_info'])
+            
+            # Convert boolean fields
+            workflow['reviewer_approved'] = bool(workflow.get('reviewer_approved'))
+            workflow['hos_approved'] = bool(workflow.get('hos_approved'))
+            
+            return workflow
+    except Exception as e:
+        logger.error(f"Error getting workflow {workflow_id}: {e}")
+        return None
+
+
+def delete_workflow(workflow_id: str) -> bool:
+    """Delete approval workflow from database"""
+    try:
+        with _connect() as conn:
+            conn.execute("DELETE FROM approval_workflows WHERE workflow_id = ?", (workflow_id,))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error deleting workflow {workflow_id}: {e}")
+        return False
+
+
+def get_all_pending_workflows() -> List[Dict[str, Any]]:
+    """Get all pending workflows (for recovery on startup)"""
+    try:
+        with _connect() as conn:
+            rows = conn.execute("""
+                SELECT * FROM approval_workflows 
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+            """).fetchall()
+            
+            workflows = []
+            columns = [desc[0] for desc in conn.description]
+            
+            for row in rows:
+                workflow = dict(zip(columns, row))
+                
+                # Deserialize JSON fields
+                if workflow.get('task_data'):
+                    workflow['task_data'] = json.loads(workflow['task_data'])
+                if workflow.get('version_info'):
+                    workflow['version_info'] = json.loads(workflow['version_info'])
+                
+                # Convert boolean fields
+                workflow['reviewer_approved'] = bool(workflow.get('reviewer_approved'))
+                workflow['hos_approved'] = bool(workflow.get('hos_approved'))
+                
+                workflows.append(workflow)
+            
+            return workflows
+    except Exception as e:
+        logger.error(f"Error getting pending workflows: {e}")
+        return []
+
+
+async def save_workflow_async(workflow_id: str, workflow_data: Dict[str, Any]) -> bool:
+    """Async wrapper for save_workflow"""
+    return await asyncio.get_event_loop().run_in_executor(None, save_workflow, workflow_id, workflow_data)
+
+
+async def get_workflow_async(workflow_id: str) -> Optional[Dict[str, Any]]:
+    """Async wrapper for get_workflow"""
+    return await asyncio.get_event_loop().run_in_executor(None, get_workflow, workflow_id)
+
+
+async def delete_workflow_async(workflow_id: str) -> bool:
+    """Async wrapper for delete_workflow"""
+    return await asyncio.get_event_loop().run_in_executor(None, delete_workflow, workflow_id)
+
+
+async def get_all_pending_workflows_async() -> List[Dict[str, Any]]:
+    """Async wrapper for get_all_pending_workflows"""
+    return await asyncio.get_event_loop().run_in_executor(None, get_all_pending_workflows)
 
 
 async def check_duplicate_async(reference_number: str) -> Dict[str, Any]:

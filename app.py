@@ -85,6 +85,14 @@ async def lifespan(app):
         except Exception as e:
             logger.error(f"❌ Failed to get bot user ID on startup: {e}")
             logger.error("Bot will not respond to mentions!")
+    
+    # Recover pending approval workflows from database
+    try:
+        from video_upload_system import recover_pending_workflows
+        await recover_pending_workflows()
+    except Exception as e:
+        logger.error(f"❌ Failed to recover pending workflows: {e}")
+    
     # Startup completed
     yield
     # Shutdown cleanup - nothing needed anymore
@@ -537,8 +545,8 @@ async def slack_interactive(request: Request):
                     asyncio.create_task(handle_reviewer_approval(workflow_id, user_id, response_url))
                 elif action_id == "reject_video_reviewer":
                     # Open modal for rejection comments
-                    from video_upload_system import approval_workflows
-                    workflow = approval_workflows.get(workflow_id, {})
+                    from video_upload_system import get_workflow_with_cache
+                    workflow = await get_workflow_with_cache(workflow_id) or {}
                     task_number = workflow.get('task_number', 'Unknown')
                     
                     await slack_client.views_open(
@@ -585,8 +593,8 @@ async def slack_interactive(request: Request):
                     asyncio.create_task(handle_hos_approval(workflow_id, user_id, response_url))
                 elif action_id == "reject_video_hos":
                     # Open modal for rejection comments
-                    from video_upload_system import approval_workflows
-                    workflow = approval_workflows.get(workflow_id, {})
+                    from video_upload_system import get_workflow_with_cache
+                    workflow = await get_workflow_with_cache(workflow_id) or {}
                     task_number = workflow.get('task_number', 'Unknown')
                     
                     await slack_client.views_open(
