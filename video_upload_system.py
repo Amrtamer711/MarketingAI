@@ -1205,7 +1205,9 @@ async def update_excel_status(task_number: int, folder: str, version: Optional[i
             "rejected": "Editing",
             "submitted": "Submitted to Sales",
             "accepted": "Done",
-            "returned": "Returned"
+            "returned": "Returned",
+            # Permanently Rejected videos also go to rejected folder
+            "permanently_rejected": "Permanently Rejected"
         }
         
         new_status = folder_to_status.get(folder, "Unknown")
@@ -2619,6 +2621,198 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
         
     except Exception as e:
         logger.error(f"Error in cleanup_other_versions: {e}")
+
+
+async def handle_permanent_rejection(task_number: int, task_data: Dict[str, Any]):
+    """Handle permanent rejection of a task - reject all videos and cancel workflows"""
+    try:
+        logger.info(f"Processing permanent rejection for Task #{task_number}")
+        
+        # Get videographer info
+        videographer_name = task_data.get('Videographer', '')
+        videographer_id = None
+        
+        # Load config to get videographer Slack ID
+        from management import load_videographer_config
+        config = load_videographer_config()
+        videographers = config.get('videographers', {})
+        
+        if videographer_name and videographer_name in videographers:
+            videographer_info = videographers[videographer_name]
+            videographer_id = videographer_info.get('slack_user_id') if isinstance(videographer_info, dict) else None
+        
+        # Search for all videos of this task
+        base_filename = f"Task{task_number}_"
+        videos_rejected = []
+        
+        # Search all folders for this task's videos
+        all_folders = ["raw", "pending", "submitted", "returned", "rejected"]
+        
+        for folder_name in all_folders:
+            folder_path = DROPBOX_FOLDERS.get(folder_name)
+            if not folder_path:
+                continue
+                
+            try:
+                # List files in folder
+                result = dropbox_manager.dbx.files_list_folder(folder_path)
+                
+                while True:
+                    for entry in result.entries:
+                        if isinstance(entry, dropbox.files.FileMetadata):
+                            # Check if this is a video for the task
+                            if entry.name.startswith(base_filename):
+                                # If not already in rejected folder, move it
+                                if folder_name != "rejected":
+                                    try:
+                                        # Move to rejected folder
+                                        to_path = f"{DROPBOX_FOLDERS['rejected']}/{entry.name}"
+                                        
+                                        # Check if file already exists in rejected folder
+                                        try:
+                                            dropbox_manager.dbx.files_get_metadata(to_path)
+                                            # File exists, need to rename
+                                            base_name = entry.name.rsplit('.', 1)[0]
+                                            extension = entry.name.rsplit('.', 1)[1] if '.' in entry.name else 'mp4'
+                                            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                            to_path = f"{DROPBOX_FOLDERS['rejected']}/{base_name}_perm_{timestamp}.{extension}"
+                                        except:
+                                            # File doesn't exist, proceed normally
+                                            pass
+                                        
+                                        dropbox_manager.dbx.files_move_v2(entry.path_display, to_path)
+                                        logger.info(f"Moved {entry.name} from {folder_name} to rejected (permanent)")
+                                        
+                                        videos_rejected.append({
+                                            'filename': entry.name,
+                                            'from_folder': folder_name
+                                        })
+                                    except Exception as e:
+                                        logger.error(f"Error moving {entry.name} to rejected: {e}")
+                                else:
+                                    # Already in rejected folder
+                                    videos_rejected.append({
+                                        'filename': entry.name,
+                                        'from_folder': 'rejected (already)'
+                                    })
+                    
+                    # Check if there are more files
+                    if not result.has_more:
+                        break
+                    result = dropbox_manager.dbx.files_list_folder_continue(result.cursor)
+                    
+            except Exception as e:
+                logger.error(f"Error searching folder {folder_name}: {e}")
+        
+        # Cancel all active workflows for this task
+        workflows_cancelled = []
+        
+        # Check in-memory workflows
+        for workflow_id, workflow in list(approval_workflows.items()):
+            if workflow.get('task_number') == task_number:
+                workflows_cancelled.append((workflow_id, workflow))
+                
+                # Remove from cache and database
+                if workflow_id in approval_workflows:
+                    del approval_workflows[workflow_id]
+                await delete_workflow_async(workflow_id)
+        
+        # Check database workflows
+        try:
+            all_pending_workflows = await get_all_pending_workflows_async()
+            for workflow in all_pending_workflows:
+                if workflow.get('task_number') == task_number:
+                    workflow_id = workflow['workflow_id']
+                    if workflow_id not in [w[0] for w in workflows_cancelled]:
+                        workflows_cancelled.append((workflow_id, workflow))
+                        await delete_workflow_async(workflow_id)
+        except Exception as e:
+            logger.error(f"Error checking database for workflows: {e}")
+        
+        # Update any active Slack messages
+        for workflow_id, workflow in workflows_cancelled:
+            try:
+                stage = workflow.get('stage', '')
+                
+                if stage == 'reviewer' and workflow.get('reviewer_msg_ts'):
+                    reviewer_channel = (await get_reviewer_channel()) or workflow.get('reviewer_id')
+                    if reviewer_channel:
+                        try:
+                            await slack_client.chat_update(
+                                channel=reviewer_channel,
+                                ts=workflow['reviewer_msg_ts'],
+                                text="⛔ This task has been permanently rejected",
+                                blocks=[{
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": f"⛔ *Task Permanently Rejected*\n\nTask #{task_number} has been permanently rejected and archived."
+                                    }
+                                }]
+                            )
+                        except Exception as e:
+                            logger.warning(f"Could not update reviewer message: {e}")
+                
+                elif stage == 'hos' and workflow.get('hos_msg_ts'):
+                    hos_channel = workflow.get('hos_id')
+                    if hos_channel:
+                        try:
+                            await slack_client.chat_update(
+                                channel=hos_channel,
+                                ts=workflow['hos_msg_ts'],
+                                text="⛔ This task has been permanently rejected",
+                                blocks=[{
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": f"⛔ *Task Permanently Rejected*\n\nTask #{task_number} has been permanently rejected and archived."
+                                    }
+                                }]
+                            )
+                        except Exception as e:
+                            logger.warning(f"Could not update HoS message: {e}")
+                            
+            except Exception as e:
+                logger.error(f"Error updating messages for workflow {workflow_id}: {e}")
+        
+        # Notify videographer about permanent rejection
+        if videographer_id and videos_rejected:
+            try:
+                video_list = "\n".join([f"• `{v['filename']}` (from {v['from_folder']})" for v in videos_rejected])
+                
+                await slack_client.chat_postMessage(
+                    channel=videographer_id,
+                    text=f"⛔ Task #{task_number} has been permanently rejected",
+                    blocks=[{
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"⛔ *Task Permanently Rejected*\n\nTask #{task_number} has been permanently rejected and archived.\n\n" +
+                                   f"Brand: {task_data.get('Brand', 'N/A')}\n" +
+                                   f"Reference: {task_data.get('Reference Number', 'N/A')}\n\n" +
+                                   f"The following videos have been moved to the rejected folder:\n{video_list}\n\n" +
+                                   "*This task will not count towards reviewer response time metrics.*"
+                        }
+                    }]
+                )
+            except Exception as e:
+                logger.error(f"Error notifying videographer: {e}")
+        
+        # Archive any Trello card
+        try:
+            from trello_utils import get_trello_card_by_task_number, archive_trello_card
+            card = await get_trello_card_by_task_number(task_number)
+            if card:
+                archive_trello_card(card['id'])
+                logger.info(f"Archived Trello card for permanently rejected Task #{task_number}")
+        except Exception as e:
+            logger.warning(f"Error archiving Trello card: {e}")
+        
+        logger.info(f"Permanent rejection completed for Task #{task_number}")
+        
+    except Exception as e:
+        logger.error(f"Error in handle_permanent_rejection: {e}")
+        raise
 
 
 async def recover_pending_workflows():

@@ -757,7 +757,28 @@ async def update_task(task_number: int, updates: Dict[str, Any], current_data: D
             if details_changed or 'Videographer' in updates:
                 trello_updates_needed = True
         
-        # Persist DB updates
+        # Check if status is being changed to Permanently Rejected
+        if updates.get('Status') == 'Permanently Rejected':
+            # Import the permanent rejection handler
+            from video_upload_system import handle_permanent_rejection
+            
+            # Update status first so it's recorded properly
+            updates['Rejected Timestamps'] = datetime.now(UAE_TZ).strftime('%d-%m-%Y %H:%M:%S')
+            ok = update_task_by_number(task_number, updates)
+            if not ok:
+                return {"success": False, "error": "DB update failed"}
+            
+            # Handle permanent rejection (moves videos, cancels workflows, notifies)
+            await handle_permanent_rejection(task_number, current_data)
+            
+            # Archive the task instead of just updating
+            ok = archive_task(task_number)
+            if not ok:
+                return {"success": False, "error": "Failed to archive permanently rejected task"}
+            
+            return {"success": True, "updates": updates, "archived": True}
+        
+        # Persist DB updates for normal cases
         ok = update_task_by_number(task_number, updates)
         if not ok:
             return {"success": False, "error": "DB update failed"}
