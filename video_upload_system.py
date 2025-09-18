@@ -2189,6 +2189,9 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
         # Update status to Done
         await update_excel_status(task_number, "Accepted", version=version)
         
+        # CLEANUP: Find and reject all other versions of this task
+        await cleanup_other_versions(task_number, version)
+        
         # Archive task to historical DB and remove from Trello
         await archive_and_remove_completed_task(task_number)
         
@@ -2412,6 +2415,200 @@ async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str
         
     except Exception as e:
         logger.error(f"Error handling HoS rejection: {e}")
+
+
+async def cleanup_other_versions(task_number: int, accepted_version: int):
+    """When a video is accepted, find and reject all other versions"""
+    try:
+        logger.info(f"Starting cleanup for Task #{task_number}, accepted version: {accepted_version}")
+        
+        # Search pattern for this task's videos
+        base_filename = f"Task{task_number}_"
+        videos_to_reject = []
+        workflows_to_cancel = []
+        
+        # Search all folders except accepted
+        folders_to_search = ["pending", "submitted", "returned", "raw"]
+        
+        for folder_name in folders_to_search:
+            folder_path = DROPBOX_FOLDERS.get(folder_name)
+            if not folder_path:
+                continue
+                
+            try:
+                # List files in folder
+                result = dropbox_manager.dbx.files_list_folder(folder_path)
+                
+                while True:
+                    for entry in result.entries:
+                        if isinstance(entry, dropbox.files.FileMetadata):
+                            # Check if this is a video for the same task
+                            if entry.name.startswith(base_filename):
+                                # Extract version from filename
+                                version_match = re.search(r'_(\d+)\.', entry.name)
+                                if version_match:
+                                    file_version = int(version_match.group(1))
+                                    # Don't reject the accepted version
+                                    if file_version != accepted_version:
+                                        videos_to_reject.append({
+                                            'path': entry.path_display,
+                                            'filename': entry.name,
+                                            'folder': folder_name,
+                                            'version': file_version
+                                        })
+                    
+                    # Check if there are more files
+                    if not result.has_more:
+                        break
+                    result = dropbox_manager.dbx.files_list_folder_continue(result.cursor)
+                    
+            except Exception as e:
+                logger.error(f"Error searching folder {folder_name}: {e}")
+        
+        logger.info(f"Found {len(videos_to_reject)} videos to reject for Task #{task_number}")
+        
+        # Move all found videos to rejected folder
+        for video in videos_to_reject:
+            try:
+                # Move to rejected folder
+                to_path = f"{DROPBOX_FOLDERS['rejected']}/{video['filename']}"
+                
+                # Check if file already exists in rejected folder
+                try:
+                    dropbox_manager.dbx.files_get_metadata(to_path)
+                    # File exists, need to rename
+                    base_name = video['filename'].rsplit('.', 1)[0]
+                    extension = video['filename'].rsplit('.', 1)[1] if '.' in video['filename'] else 'mp4'
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    to_path = f"{DROPBOX_FOLDERS['rejected']}/{base_name}_dup_{timestamp}.{extension}"
+                except:
+                    # File doesn't exist, proceed normally
+                    pass
+                
+                dropbox_manager.dbx.files_move_v2(video['path'], to_path)
+                
+                logger.info(f"Moved {video['filename']} from {video['folder']} to rejected")
+                
+                # Find and cancel any active workflows for this video
+                for workflow_id, workflow in list(approval_workflows.items()):
+                    if (workflow.get('task_number') == task_number and 
+                        workflow.get('filename') == video['filename']):
+                        workflows_to_cancel.append((workflow_id, workflow))
+                
+            except Exception as e:
+                logger.error(f"Error moving {video['filename']} to rejected: {e}")
+        
+        # Also check database for workflows not in memory
+        try:
+            all_pending_workflows = await get_all_pending_workflows_async()
+            for workflow in all_pending_workflows:
+                if (workflow.get('task_number') == task_number and 
+                    workflow.get('workflow_id') not in [w[0] for w in workflows_to_cancel]):
+                    # Extract version from workflow filename
+                    version_match = re.search(r'_(\d+)\.', workflow.get('filename', ''))
+                    if version_match:
+                        file_version = int(version_match.group(1))
+                        if file_version != accepted_version:
+                            workflows_to_cancel.append((workflow['workflow_id'], workflow))
+        except Exception as e:
+            logger.error(f"Error checking database for workflows: {e}")
+        
+        # Cancel active workflows and update messages
+        for workflow_id, workflow in workflows_to_cancel:
+            try:
+                logger.info(f"Canceling workflow {workflow_id} for {workflow['filename']}")
+                
+                # Update Slack messages based on workflow stage
+                stage = workflow.get('stage', '')
+                
+                if stage == 'reviewer' and workflow.get('reviewer_msg_ts'):
+                    # Update reviewer message
+                    reviewer_channel = (await get_reviewer_channel()) or workflow.get('reviewer_id')
+                    if reviewer_channel:
+                        try:
+                            await slack_client.chat_update(
+                                channel=reviewer_channel,
+                                ts=workflow['reviewer_msg_ts'],
+                                text=f"⚠️ This approval request is no longer valid - another version was accepted",
+                                blocks=[{
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": f"⚠️ *This approval request is no longer valid*\n\nTask #{task_number}: `{workflow['filename']}`\n\nAnother version (v{accepted_version}) has been accepted. This video has been moved to rejected."
+                                    }
+                                }]
+                            )
+                        except Exception as e:
+                            logger.warning(f"Could not update reviewer message: {e}")
+                
+                elif stage == 'hos' and workflow.get('hos_msg_ts'):
+                    # Update HoS message
+                    hos_channel = workflow.get('hos_id')
+                    if hos_channel:
+                        try:
+                            await slack_client.chat_update(
+                                channel=hos_channel,
+                                ts=workflow['hos_msg_ts'],
+                                text=f"⚠️ This approval request is no longer valid - another version was accepted",
+                                blocks=[{
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": f"⚠️ *This approval request is no longer valid*\n\nTask #{task_number}: `{workflow['filename']}`\n\nAnother version (v{accepted_version}) has been accepted. This video has been moved to rejected."
+                                    }
+                                }]
+                            )
+                        except Exception as e:
+                            logger.warning(f"Could not update HoS message: {e}")
+                
+                # Remove workflow from cache and database
+                if workflow_id in approval_workflows:
+                    del approval_workflows[workflow_id]
+                await delete_workflow_async(workflow_id)
+                
+            except Exception as e:
+                logger.error(f"Error canceling workflow {workflow_id}: {e}")
+        
+        # Notify videographers about auto-rejected videos
+        videographers_notified = set()
+        for video in videos_to_reject:
+            try:
+                # Find videographer for this video
+                videographer_id = None
+                for workflow_id, workflow in workflows_to_cancel:
+                    if workflow.get('filename') == video['filename']:
+                        videographer_id = workflow.get('videographer_id')
+                        break
+                
+                if videographer_id and videographer_id not in videographers_notified:
+                    videographers_notified.add(videographer_id)
+                    
+                    # Count how many videos were rejected for this videographer
+                    videographer_videos = [v for v in videos_to_reject if any(
+                        w[1].get('videographer_id') == videographer_id and w[1].get('filename') == v['filename'] 
+                        for w in workflows_to_cancel
+                    )]
+                    
+                    if videographer_videos:
+                        await slack_client.chat_postMessage(
+                            channel=videographer_id,
+                            text=f"ℹ️ Your videos for Task #{task_number} have been auto-rejected",
+                            blocks=[{
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"ℹ️ *Videos Auto-Rejected*\n\nTask #{task_number} - Version {accepted_version} has been accepted.\n\nThe following videos were automatically moved to rejected:\n" + 
+                                           "\n".join([f"• `{v['filename']}` (v{v['version']})" for v in videographer_videos])
+                                }
+                            }]
+                        )
+            except Exception as e:
+                logger.error(f"Error notifying videographer: {e}")
+        
+        logger.info(f"Cleanup completed for Task #{task_number}")
+        
+    except Exception as e:
+        logger.error(f"Error in cleanup_other_versions: {e}")
 
 
 async def recover_pending_workflows():
