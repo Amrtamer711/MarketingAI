@@ -722,15 +722,21 @@ async def update_task(task_number: int, updates: Dict[str, Any], current_data: D
             current_data = dict(current_row)
             current_data['Task #'] = current_data.get('task_number', task_number)
         
-        # Check assignment
-        is_assigned = str(current_data.get('Status', '')).startswith('Assigned to')
+        # Check if task has a Trello card (assigned or in video workflow)
+        status = str(current_data.get('Status', ''))
+        has_trello_card = (
+            status.startswith('Assigned to') or 
+            status in ['Critique', 'Editing', 'Submitted to Sales', 'Returned', 'Done']
+        )
         trello_updates_needed = False
         trello_updates = {}
         
-        # If assigned, prepare Trello updates
-        if is_assigned:
+        # If has Trello card, prepare Trello updates
+        if has_trello_card:
             if 'Videographer' in updates and updates['Videographer'] != current_data.get('Videographer'):
-                updates['Status'] = f"Assigned to {updates['Videographer']}"
+                # Only update status if it's currently "Assigned to X"
+                if status.startswith('Assigned to'):
+                    updates['Status'] = f"Assigned to {updates['Videographer']}"
                 trello_updates_needed = True
                 trello_updates['assignee'] = updates['Videographer']
             if 'Status' in updates and updates['Status'] != current_data.get('Status'):
@@ -755,7 +761,7 @@ async def update_task(task_number: int, updates: Dict[str, Any], current_data: D
             return {"success": False, "error": "DB update failed"}
         
         # Trello updates
-        if is_assigned and trello_updates_needed:
+        if has_trello_card and trello_updates_needed:
             trello_card = await get_trello_card_by_task_number(task_number)
             if trello_card:
                 updated_data = current_data.copy()
