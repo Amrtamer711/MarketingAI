@@ -592,15 +592,16 @@ def get_workflow(workflow_id: str) -> Optional[Dict[str, Any]]:
     """Get approval workflow from database"""
     try:
         with _connect() as conn:
-            row = conn.execute("""
+            cursor = conn.execute("""
                 SELECT * FROM approval_workflows WHERE workflow_id = ?
-            """, (workflow_id,)).fetchone()
+            """, (workflow_id,))
+            row = cursor.fetchone()
             
             if not row:
                 return None
             
             # Convert row to dict
-            columns = [desc[0] for desc in conn.description]
+            columns = [desc[0] for desc in cursor.description]
             workflow = dict(zip(columns, row))
             
             # Deserialize JSON fields
@@ -635,14 +636,15 @@ def get_all_pending_workflows() -> List[Dict[str, Any]]:
     """Get all pending workflows (for recovery on startup)"""
     try:
         with _connect() as conn:
-            rows = conn.execute("""
+            cursor = conn.execute("""
                 SELECT * FROM approval_workflows 
                 WHERE status = 'pending'
                 ORDER BY created_at ASC
-            """).fetchall()
+            """)
+            rows = cursor.fetchall()
             
             workflows = []
-            columns = [desc[0] for desc in conn.description]
+            columns = [desc[0] for desc in cursor.description]
             
             for row in rows:
                 workflow = dict(zip(columns, row))
