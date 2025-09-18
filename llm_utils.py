@@ -331,6 +331,17 @@ CRITICAL VALIDATION RULES - YOU MUST ENFORCE:
 3. Videographer - ONLY accept these exact values: {list(mapping_cfg.get('videographers', {}).keys())}
    Auto-map: "James"→"James Sevillano", "Jason"→"Jason Pieterse", "Cesar"→"Cesar Sierra", "Amr"→"Amr Tamer"
    If invalid: keep current value, tell user valid options
+4. Status - ONLY accept these exact values:
+   - "Not assigned yet"
+   - "Assigned to [Videographer Name]" (videographer must be from the valid list)
+   - "Raw"
+   - "Critique" 
+   - "Editing"
+   - "Submitted to Sales"
+   - "Returned"
+   - "Done"
+   Auto-map: "Accepted"→"Done", "Completed"→"Done", "Rejected"→"Editing", "Pending"→"Critique"
+   If user tries to set other values: keep current value, tell user valid options
 
 Return JSON with: action, fields (only changed fields with VALID values), message.
 In your message, explain any fields that couldn't be updated due to invalid values.
