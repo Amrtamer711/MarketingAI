@@ -67,3 +67,8 @@ CAMPAIGN_LOOKAHEAD_WORKING_DAYS = 10  # Working days before campaign to create t
 PLANNING_OFFSET_DAYS = 1
 VIDEO_TASK_OFFSET_WORKING_DAYS = 2
 
+# Slack message close behavior: 'delete' or 'resolve'
+SLACK_CLOSE_MODE = os.getenv("SLACK_CLOSE_MODE", "delete").lower()
+if SLACK_CLOSE_MODE not in ("delete", "resolve"):
+    SLACK_CLOSE_MODE = "delete"
+

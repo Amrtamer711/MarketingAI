@@ -17,6 +17,7 @@ import pandas as pd
 import requests
 
 from clients import slack_client
+from utils import post_response_url
 from config import CREDENTIALS_PATH, UAE_TZ, SLACK_BOT_TOKEN, OPENAI_API_KEY, VIDEOGRAPHER_CONFIG_PATH
 from logger import logger
 from simple_permissions import check_permission as simple_check_permission
@@ -466,7 +467,14 @@ class DropboxManager:
             
         except Exception as e:
             logger.error(f"Error moving file: {e}")
-            raise
+            # Retry once after refreshing token
+            try:
+                self._refresh_token()
+                result = self.dbx.files_move_v2(from_path, to_path)
+                logger.info(f"✅ Moved {filename} to {to_folder_path} (after token refresh)")
+                return result.metadata.path_display
+            except Exception:
+                raise
 
 # Initialize Dropbox manager
 dropbox_manager = DropboxManager()
@@ -1160,7 +1168,7 @@ async def update_approval_message(response_url: str, filename: str, status_text:
         user_name = user_info["user"]["profile"].get("real_name", "Unknown")
         
         # Update message
-        requests.post(response_url, json={
+        await post_response_url(response_url, {
             "replace_original": True,
             "text": f"{status_text}\n\nFile: `{filename}`\nActioned by: {user_name}"
         })
@@ -1617,7 +1625,7 @@ async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url:
         # Check permissions
         has_permission, error_msg = simple_check_permission(user_id, "approve_video_reviewer")
         if not has_permission:
-            requests.post(response_url, json={
+            await post_response_url(response_url, {
                 "replace_original": True,
                 "text": error_msg
             })
@@ -1749,7 +1757,7 @@ async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url:
         
         # Update reviewer's message with video link
         video_link = await dropbox_manager.get_shared_link(workflow['dropbox_path'])
-        requests.post(response_url, json={
+        await post_response_url(response_url, {
             "replace_original": True,
             "text": f"✅ Video accepted and sent to Head of Sales\nTask #{task_number}: `{filename}`",
             "blocks": [
@@ -1779,7 +1787,7 @@ async def handle_reviewer_rejection(workflow_id: str, user_id: str, response_url
         # Check permissions
         has_permission, error_msg = simple_check_permission(user_id, "approve_video_reviewer")
         if not has_permission:
-            requests.post(response_url, json={
+            await post_response_url(response_url, {
                 "replace_original": True,
                 "text": error_msg
             })
@@ -2158,7 +2166,7 @@ async def handle_sales_rejection(workflow_id: str, user_id: str, response_url: s
             )
         
         # Update sales message
-        requests.post(response_url, json={
+        await post_response_url(response_url, {
             "replace_original": True,
             "text": (f"❌ Video rejected and returned\n"
                     f"Task #{task_number}: `{filename}`\n"
@@ -2240,7 +2248,7 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
         # Check permissions
         has_permission, error_msg = simple_check_permission(user_id, "approve_video_hos")
         if not has_permission:
-            requests.post(response_url, json={
+            await post_response_url(response_url, {
                 "replace_original": True,
                 "text": error_msg
             })
@@ -2380,7 +2388,7 @@ async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str
         # Check permissions
         has_permission, error_msg = simple_check_permission(user_id, "approve_video_hos")
         if not has_permission:
-            requests.post(response_url, json={
+            await post_response_url(response_url, {
                 "replace_original": True,
                 "text": error_msg
             })

@@ -7,6 +7,10 @@ from datetime import datetime, timedelta
 import pandas as pd
 from uae_holidays import add_working_days, is_working_day, get_next_working_day, get_previous_working_day
 from logger import logger
+import asyncio
+import os
+from typing import Optional
+import httpx
 # Note: user_history will be imported where needed to avoid circular imports
 import re
 
@@ -19,6 +23,9 @@ __all__ = [
 	"_format_locations_hint",
 	"_format_videographers_hint",
 	"append_to_history",
+    "post_response_url",
+    "close_slack_message",
+    "retry_sync",
 ]
 
 # ========== PYDANTIC MODELS ==========
@@ -308,3 +315,74 @@ def check_raw_folder_deadline(filming_date, current_date=None):
         check_date += timedelta(days=1)
     
     return is_overdue, working_days_in_raw
+
+
+# ========== ASYNC HTTP HELPERS ==========
+async def post_response_url(response_url: str, payload: dict) -> None:
+    """Post to Slack response_url without blocking the event loop."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(response_url, json=payload)
+    except Exception as e:
+        logger.warning(f"response_url post failed: {e}")
+
+
+async def close_slack_message(slack_client, *, ts: str, channel: str, mode: Optional[str] = None,
+                              resolved_text: Optional[str] = None, resolved_blocks: Optional[list] = None) -> None:
+    """Close a Slack message by deleting it or replacing it with a resolved message.
+    mode: 'delete' or 'resolve' (falls back to env SLACK_CLOSE_MODE).
+    """
+    from config import SLACK_CLOSE_MODE
+    chosen = (mode or SLACK_CLOSE_MODE or "delete").lower()
+
+    # Small retry loop for transient Slack errors
+    async def _with_retry(coro_factory, attempts: int = 3):
+        last_err = None
+        for _ in range(attempts):
+            try:
+                return await coro_factory()
+            except Exception as err:
+                last_err = err
+                await asyncio.sleep(0.5)
+        if last_err:
+            raise last_err
+
+    try:
+        if chosen == "delete":
+            await _with_retry(lambda: slack_client.chat_delete(channel=channel, ts=ts))
+            return
+        # resolve fallback
+        text = resolved_text or "✅ Resolved"
+        blocks = resolved_blocks or [{
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": text}
+        }]
+        await _with_retry(lambda: slack_client.chat_update(channel=channel, ts=ts, text=text, blocks=blocks))
+    except Exception as e:
+        # Best-effort; log and continue
+        logger.warning(f"Failed to close Slack message ts={ts} channel={channel}: {e}")
+
+
+# ========== SIMPLE RETRY (SYNC) ==========
+def retry_sync(max_attempts: int = 3, base_delay: float = 0.5):
+    """Decorator factory for simple sync retries with exponential backoff."""
+    def _decorator(func):
+        def _wrapped(*args, **kwargs):
+            last_err = None
+            delay = base_delay
+            for _ in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as err:
+                    last_err = err
+                    try:
+                        asyncio.sleep(0)  # yield if inside event loop; harmless in sync
+                    except Exception:
+                        pass
+                    import time
+                    time.sleep(delay)
+                    delay *= 2
+            if last_err:
+                raise last_err
+        return _wrapped
+    return _decorator

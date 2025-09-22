@@ -13,6 +13,7 @@ from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 
 from clients import slack_client, signature_verifier, api, logger
+from utils import post_response_url
 from config import UAE_TZ, SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, OPENAI_API_KEY
 from db_utils import save_task, get_all_tasks_df, init_db_async
 from history import pending_confirmations
@@ -423,6 +424,10 @@ async def slack_interactive(request: Request):
     if not signature_verifier.is_valid(body.decode(), timestamp, signature):
         raise HTTPException(status_code=403, detail="Invalid request signature")
     
+    # Ignore Slack retries to prevent duplicate processing
+    if request.headers.get("X-Slack-Retry-Num"):
+        return JSONResponse({"status": "retry_ignored"})
+
     # Parse the payload
     form_data = await request.form()
     payload = json.loads(form_data.get("payload", "{}"))
@@ -446,7 +451,7 @@ async def slack_interactive(request: Request):
                 logger.info(f"Spam click detected from {user_id} on {action_id}")
                 # Send ephemeral message about the debounce
                 if response_url:
-                    requests.post(response_url, json={
+                    await post_response_url(response_url, {
                         "replace_original": False,
                         "response_type": "ephemeral",
                         "text": "⏳ Please wait a moment before clicking again..."
@@ -493,7 +498,7 @@ async def slack_interactive(request: Request):
                         )
                         
                         # Update the message
-                        requests.post(response_url, json={
+                        await post_response_url(response_url, {
                             "replace_original": True,
                             "text": f"🎥 Processing upload for Task #{task_number} to {folder} folder..."
                         })
@@ -513,14 +518,14 @@ async def slack_interactive(request: Request):
                         )
                         
                         # Update the message
-                        requests.post(response_url, json={
+                        await post_response_url(response_url, {
                             "replace_original": True,
                             "text": f"🎥 Processing upload of `{file_name}` to {folder} folder..."
                         })
                     
                 except Exception as e:
                     logger.error(f"Error processing video folder selection: {e}")
-                    requests.post(response_url, json={
+                    await post_response_url(response_url, {
                         "replace_original": True,
                         "text": "❌ Error processing video upload. Please try again."
                     })
@@ -539,7 +544,7 @@ async def slack_interactive(request: Request):
                 
                 if action_id == "approve_video_reviewer":
                     # Send immediate "Please wait" response
-                    requests.post(response_url, json={
+                    await post_response_url(response_url, {
                         "replace_original": True,
                         "text": "⏳ Please wait... Processing approval..."
                     })
@@ -587,7 +592,7 @@ async def slack_interactive(request: Request):
                     )
                 elif action_id == "approve_video_hos":
                     # Send immediate "Please wait" response
-                    requests.post(response_url, json={
+                    await post_response_url(response_url, {
                         "replace_original": True,
                         "text": "⏳ Please wait... Processing final approval..."
                     })
@@ -636,7 +641,7 @@ async def slack_interactive(request: Request):
                 # Handle the new workflow-based actions from send_reviewer_approval and send_sales_approval
                 elif action_id == "approve_video_workflow":
                     # Similar to approve_video_reviewer
-                    requests.post(response_url, json={
+                    await post_response_url(response_url, {
                         "replace_original": True,
                         "text": "⏳ Please wait... Processing approval..."
                     })
@@ -685,7 +690,7 @@ async def slack_interactive(request: Request):
                 elif action_id == "approve_video_sales_workflow":
                     # Handle sales approval
                     from video_upload_system import handle_sales_approval
-                    requests.post(response_url, json={
+                    await post_response_url(response_url, {
                         "replace_original": True,
                         "text": "⏳ Please wait... Processing sales approval..."
                     })
@@ -693,7 +698,7 @@ async def slack_interactive(request: Request):
                 elif action_id == "return_video_sales_workflow":
                     # Handle sales return
                     from video_upload_system import handle_sales_rejection
-                    requests.post(response_url, json={
+                    await post_response_url(response_url, {
                         "replace_original": True,
                         "text": "⏳ Please wait... Processing return request..."
                     })
@@ -729,7 +734,7 @@ async def slack_interactive(request: Request):
             from video_upload_system import handle_reviewer_rejection, handle_hos_rejection
             
             # Send immediate "Please wait" response
-            requests.post(response_url, json={
+            await post_response_url(response_url, {
                 "replace_original": True,
                 "text": "⏳ Please wait... Processing rejection..."
             })

@@ -96,6 +96,12 @@ def init_db() -> None:
                     status TEXT DEFAULT 'pending'
                 );
             """)
+            # Helpful indexes for faster lookups
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_aw_task ON approval_workflows(task_number)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_aw_status ON approval_workflows(status)")
+            except Exception as e:
+                logger.warning(f"Index creation failed or already exists: {e}")
             # Seed sequence so live task_number keeps increasing beyond history
             try:
                 cur = conn.execute(f"SELECT COALESCE(MAX(task_number), 0) FROM {LIVE_TABLE}")

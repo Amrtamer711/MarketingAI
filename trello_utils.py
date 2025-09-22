@@ -2,12 +2,14 @@ import requests
 from typing import Dict, Any
 from config import TRELLO_API_KEY, TRELLO_API_TOKEN, BOARD_NAME, VIDEOGRAPHER_CONFIG_PATH
 from logger import logger
+from utils import retry_sync
 from config import WEEKEND_DAYS
 from datetime import datetime, timedelta
 from uae_holidays import is_working_day as is_uae_working_day, add_working_days as add_uae_working_days, count_working_days as count_uae_working_days
 # Removed circular imports - these will be handled differently
 
 # ========== TRELLO HELPER FUNCTIONS ==========
+@retry_sync()
 def get_trello_card_by_task_number(task_number: int):
     """Get Trello card by task number"""
     try:
@@ -56,6 +58,7 @@ def get_trello_card_by_task_number(task_number: int):
         return None
 
 
+@retry_sync()
 def update_trello_card(card_id: str, updates: Dict[str, Any]):
     """Update a Trello card with new information"""
     try:
@@ -77,6 +80,7 @@ def update_trello_card(card_id: str, updates: Dict[str, Any]):
         return False
 
 
+@retry_sync()
 def get_trello_lists():
     """Get all lists on the board"""
     try:
@@ -115,6 +119,7 @@ def get_trello_lists():
         logger.error(f"Error getting Trello lists: {e}")
         return {}
 
+@retry_sync()
 def create_trello_list(board_id: str, list_name: str, position: str = "bottom"):
     """Create a new list on a Trello board"""
     try:
@@ -132,6 +137,7 @@ def create_trello_list(board_id: str, list_name: str, position: str = "bottom"):
         logger.error(f"Error creating Trello list: {e}")
         return None
 
+@retry_sync()
 def archive_trello_list(list_id: str):
     """Archive a Trello list"""
     try:
@@ -148,6 +154,7 @@ def archive_trello_list(list_id: str):
         logger.error(f"Error archiving Trello list: {e}")
         return False
 
+@retry_sync()
 def get_list_id_for_videographer(board_id: str, videographer_name: str):
     """Get Trello list ID for a videographer"""
     try:
@@ -168,6 +175,7 @@ def get_list_id_for_videographer(board_id: str, videographer_name: str):
         logger.error(f"Error getting list ID: {e}")
         return None
 
+@retry_sync()
 def set_trello_due_complete(card_id: str, complete: bool) -> bool:
     """Set the Trello card's dueComplete checkbox (True/False)."""
     try:
@@ -185,6 +193,7 @@ def set_trello_due_complete(card_id: str, complete: bool) -> bool:
         print(f"   ⚠️ Failed to set dueComplete: {e}")
         return False
 
+@retry_sync()
 def archive_trello_card(card_id: str) -> bool:
     """Archive the Trello card (remove from board view)."""
     try:
@@ -202,6 +211,7 @@ def archive_trello_card(card_id: str) -> bool:
         logger.error(f"Failed to archive Trello card {card_id}: {e}")
         return False
 
+@retry_sync()
 def create_checklist_with_dates(card_id: str, filming_date: datetime) -> bool:
     """Create a checklist on a Trello card with filming and editing due dates"""
     try:
@@ -249,6 +259,7 @@ def create_checklist_with_dates(card_id: str, filming_date: datetime) -> bool:
         logger.error(f"Error creating checklist: {e}")
         return False
 
+@retry_sync()
 def update_checklist_dates(card_id: str, new_filming_date: datetime) -> bool:
     """Update checklist dates when filming date changes"""
     try:
@@ -578,6 +589,7 @@ def get_all_workloads(board_id, exclude_on_leave=True, target_date=None):
     
     return workloads, on_leave
 
+@retry_sync()
 def get_board_id_by_name(board_name):
     """Get Trello board ID by name"""
     url = "https://api.trello.com/1/members/me/boards"
@@ -593,6 +605,7 @@ def get_board_id_by_name(board_name):
             return board["id"]
     raise Exception(f"Board '{board_name}' not found")
 
+@retry_sync()
 def get_list_id_by_name(board_id, list_name):
     """Get Trello list ID by name"""
     url = f"https://api.trello.com/1/boards/{board_id}/lists"
@@ -609,6 +622,7 @@ def get_list_id_by_name(board_id, list_name):
             return l["id"]
     return lists[0]["id"] if lists else None
 
+@retry_sync()
 def create_card_on_board(board_name, card_title, card_description, due_date=None, list_name="Test", start_date=None):
     """Create a card on Trello board"""
     board_id = get_board_id_by_name(board_name)
