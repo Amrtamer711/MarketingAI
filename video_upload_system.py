@@ -2619,7 +2619,7 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                             except Exception as e:
                                 # Don't log as warning if it's just a message_not_found error
                                 if "message_not_found" in str(e):
-                                    logger.debug(f"Message not found for {workflow['filename']} (ts: {workflow['reviewer_msg_ts']})")
+                                    logger.debug(f"Message not found for {workflow['filename']} (ts: {workflow['reviewer_msg_ts']}). This can happen if the message was deleted or if the bot lacks permissions.")
                                 else:
                                     logger.warning(f"Could not update reviewer message for {workflow['filename']}: {e}")
                         else:
