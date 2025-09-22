@@ -2202,8 +2202,10 @@ async def archive_and_remove_completed_task(task_number: int):
             from trello_utils import get_trello_card_by_task_number, archive_trello_card
             card = await get_trello_card_by_task_number(task_number)
             if card:
-                archive_trello_card(card['id'])
+                await asyncio.to_thread(archive_trello_card, card['id'])
                 logger.info(f"Archived Trello card for Task #{task_number}")
+            else:
+                logger.warning(f"No Trello card found for Task #{task_number}")
     except Exception as e:
         logger.error(f"Error archiving completed task: {e}")
 
@@ -2857,8 +2859,10 @@ async def handle_permanent_rejection(task_number: int, task_data: Dict[str, Any]
             from trello_utils import get_trello_card_by_task_number, archive_trello_card
             card = await get_trello_card_by_task_number(task_number)
             if card:
-                archive_trello_card(card['id'])
+                await asyncio.to_thread(archive_trello_card, card['id'])
                 logger.info(f"Archived Trello card for permanently rejected Task #{task_number}")
+            else:
+                logger.warning(f"No Trello card found for permanently rejected Task #{task_number}")
         except Exception as e:
             logger.warning(f"Error archiving Trello card: {e}")
         

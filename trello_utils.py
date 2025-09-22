@@ -190,10 +190,10 @@ def archive_trello_card(card_id: str) -> bool:
         }
         resp = requests.put(url, params=params)
         resp.raise_for_status()
-        print("   🗄️ Archived Trello card")
+        logger.info(f"🗄️ Archived Trello card {card_id}")
         return True
     except Exception as e:
-        print(f"   ⚠️ Failed to archive Trello card: {e}")
+        logger.error(f"Failed to archive Trello card {card_id}: {e}")
         return False
 
 def create_checklist_with_dates(card_id: str, filming_date: datetime) -> bool:
