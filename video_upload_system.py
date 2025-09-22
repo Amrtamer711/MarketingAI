@@ -838,6 +838,7 @@ async def send_reviewer_approval(channel: str, filename: str, dropbox_path: str,
             "upload_channel": channel,
             "task_data": task_data,
             "stage": "reviewer",
+            "reviewer_id": reviewer_channel,
             "created_at": datetime.now(UAE_TZ).isoformat(),
             "version": version,
             "status": "pending"
@@ -869,6 +870,15 @@ async def send_reviewer_approval(channel: str, filename: str, dropbox_path: str,
                     {"type": "mrkdwn", "text": f"*Sales Person:* {task_data.get('Sales Person', 'N/A')}"}
                 ]
             })
+        
+        # Add video link
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"📹 <{await dropbox_manager.get_shared_link(dropbox_path)}|*Click to View/Download Video*>"
+            }
+        })
         
         # Add action buttons
         blocks.append({
@@ -1012,6 +1022,15 @@ async def send_sales_approval(filename: str, dropbox_path: str, task_data: Dict,
                     {"type": "mrkdwn", "text": f"*Reference:* {task_data.get('Reference Number', 'N/A')}"}
                 ]
             })
+        
+        # Add video link
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"📹 <{await dropbox_manager.get_shared_link(dropbox_path)}|*Click to View/Download Video*>"
+            }
+        })
         
         # Add action buttons
         blocks.append({
