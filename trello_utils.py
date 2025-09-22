@@ -11,6 +11,8 @@ from uae_holidays import is_working_day as is_uae_working_day, add_working_days 
 async def get_trello_card_by_task_number(task_number: int):
     """Get Trello card by task number"""
     try:
+        logger.debug(f"Searching for Trello card for Task #{task_number}")
+        
         # Get board ID
         url = "https://api.trello.com/1/members/me/boards"
         params = {
@@ -25,10 +27,11 @@ async def get_trello_card_by_task_number(task_number: int):
         for board in boards:
             if board["name"] == BOARD_NAME:
                 board_id = board["id"]
+                logger.debug(f"Found board '{BOARD_NAME}' with ID: {board_id}")
                 break
         
         if not board_id:
-            logger.error(f"Board '{BOARD_NAME}' not found")
+            logger.error(f"Board '{BOARD_NAME}' not found among {len(boards)} boards")
             return None
         
         # Get all cards on the board
@@ -36,17 +39,20 @@ async def get_trello_card_by_task_number(task_number: int):
         response = requests.get(url, params=params)
         response.raise_for_status()
         cards = response.json()
+        logger.debug(f"Found {len(cards)} total cards on board")
         
         # Search for card with task number in title
         search_text = f"Task #{task_number}:"
         for card in cards:
             if search_text in card['name']:
+                logger.debug(f"Found matching card: {card['name']}")
                 return card
         
+        logger.debug(f"No card found with '{search_text}' in title")
         return None
         
     except Exception as e:
-        logger.error(f"Error getting Trello card: {e}")
+        logger.error(f"Error getting Trello card for Task #{task_number}: {e}")
         return None
 
 

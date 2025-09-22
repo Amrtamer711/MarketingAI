@@ -2199,13 +2199,28 @@ async def archive_and_remove_completed_task(task_number: int):
         ok = archive_task(task_number)
         if ok:
             logger.info(f"✅ Task #{task_number} moved to history DB")
-            from trello_utils import get_trello_card_by_task_number, archive_trello_card
-            card = await get_trello_card_by_task_number(task_number)
-            if card:
-                await asyncio.to_thread(archive_trello_card, card['id'])
-                logger.info(f"Archived Trello card for Task #{task_number}")
-            else:
-                logger.warning(f"No Trello card found for Task #{task_number}")
+            
+            # Archive Trello card
+            try:
+                from trello_utils import get_trello_card_by_task_number, archive_trello_card
+                logger.info(f"Looking for Trello card for Task #{task_number}")
+                
+                # Use asyncio.to_thread for the synchronous Trello API call
+                card = await asyncio.to_thread(get_trello_card_by_task_number, task_number)
+                
+                if card:
+                    logger.info(f"Found Trello card '{card['name']}' (ID: {card['id']})")
+                    success = await asyncio.to_thread(archive_trello_card, card['id'])
+                    if success:
+                        logger.info(f"✅ Archived Trello card for Task #{task_number}")
+                    else:
+                        logger.error(f"Failed to archive Trello card for Task #{task_number}")
+                else:
+                    logger.warning(f"No Trello card found for Task #{task_number}")
+            except Exception as trello_error:
+                logger.error(f"Error handling Trello card for Task #{task_number}: {trello_error}")
+        else:
+            logger.error(f"Failed to archive Task #{task_number} in database")
     except Exception as e:
         logger.error(f"Error archiving completed task: {e}")
 
@@ -2580,31 +2595,41 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
         for workflow_id, workflow in workflows_to_cancel:
             try:
                 logger.info(f"Canceling workflow {workflow_id} for {workflow['filename']}")
+                logger.debug(f"Workflow data: stage={workflow.get('stage')}, reviewer_msg_ts={workflow.get('reviewer_msg_ts')}, reviewer_id={workflow.get('reviewer_id')}")
                 
                 # Update Slack messages based on workflow stage
                 stage = workflow.get('stage', '')
                 
-                if stage == 'reviewer' and workflow.get('reviewer_msg_ts'):
-                    # Update reviewer message
-                    reviewer_channel = (await get_reviewer_channel()) or workflow.get('reviewer_id')
-                    if reviewer_channel and workflow.get('reviewer_msg_ts'):
-                        try:
-                            await slack_client.chat_update(
-                                channel=reviewer_channel,
-                                ts=workflow['reviewer_msg_ts'],
-                                text=f"⚠️ This approval request is no longer valid - another version was accepted",
-                                blocks=[{
-                                    "type": "section",
-                                    "text": {
-                                        "type": "mrkdwn",
-                                        "text": f"⚠️ *This approval request is no longer valid*\n\nTask #{task_number}: `{workflow['filename']}`\n\nAnother version (v{accepted_version}) has been accepted. This video has been moved to rejected."
-                                    }
-                                }]
-                            )
-                        except Exception as e:
-                            logger.warning(f"Could not update reviewer message for {workflow['filename']}: {e}")
+                if stage == 'reviewer':
+                    # Update reviewer message if we have the timestamp
+                    if workflow.get('reviewer_msg_ts'):
+                        reviewer_channel = workflow.get('reviewer_id') or (await get_reviewer_channel())
+                        if reviewer_channel:
+                            try:
+                                logger.debug(f"Attempting to update message in channel {reviewer_channel} with ts {workflow['reviewer_msg_ts']}")
+                                await slack_client.chat_update(
+                                    channel=reviewer_channel,
+                                    ts=workflow['reviewer_msg_ts'],
+                                    text=f"⚠️ This approval request is no longer valid - another version was accepted",
+                                    blocks=[{
+                                        "type": "section",
+                                        "text": {
+                                            "type": "mrkdwn",
+                                            "text": f"⚠️ *This approval request is no longer valid*\n\nTask #{task_number}: `{workflow['filename']}`\n\nAnother version (v{accepted_version}) has been accepted. This video has been moved to rejected."
+                                        }
+                                    }]
+                                )
+                                logger.info(f"Successfully updated reviewer message for {workflow['filename']}")
+                            except Exception as e:
+                                # Don't log as warning if it's just a message_not_found error
+                                if "message_not_found" in str(e):
+                                    logger.debug(f"Message not found for {workflow['filename']} (ts: {workflow['reviewer_msg_ts']})")
+                                else:
+                                    logger.warning(f"Could not update reviewer message for {workflow['filename']}: {e}")
+                        else:
+                            logger.debug(f"No reviewer channel found for workflow {workflow_id}")
                     else:
-                        logger.debug(f"No reviewer message to update for workflow {workflow_id}")
+                        logger.debug(f"No reviewer message timestamp for workflow {workflow_id}")
                 
                 elif stage == 'hos' and workflow.get('hos_msg_ts'):
                     # Update HoS message
@@ -2854,10 +2879,18 @@ async def handle_permanent_rejection(task_number: int, task_data: Dict[str, Any]
         # Archive any Trello card
         try:
             from trello_utils import get_trello_card_by_task_number, archive_trello_card
-            card = await get_trello_card_by_task_number(task_number)
+            logger.info(f"Looking for Trello card for permanently rejected Task #{task_number}")
+            
+            # Use asyncio.to_thread for the synchronous Trello API call
+            card = await asyncio.to_thread(get_trello_card_by_task_number, task_number)
+            
             if card:
-                await asyncio.to_thread(archive_trello_card, card['id'])
-                logger.info(f"Archived Trello card for permanently rejected Task #{task_number}")
+                logger.info(f"Found Trello card '{card['name']}' (ID: {card['id']})")
+                success = await asyncio.to_thread(archive_trello_card, card['id'])
+                if success:
+                    logger.info(f"✅ Archived Trello card for permanently rejected Task #{task_number}")
+                else:
+                    logger.error(f"Failed to archive Trello card for permanently rejected Task #{task_number}")
             else:
                 logger.warning(f"No Trello card found for permanently rejected Task #{task_number}")
         except Exception as e:
