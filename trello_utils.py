@@ -8,7 +8,7 @@ from uae_holidays import is_working_day as is_uae_working_day, add_working_days 
 # Removed circular imports - these will be handled differently
 
 # ========== TRELLO HELPER FUNCTIONS ==========
-async def get_trello_card_by_task_number(task_number: int):
+def get_trello_card_by_task_number(task_number: int):
     """Get Trello card by task number"""
     try:
         logger.debug(f"Searching for Trello card for Task #{task_number}")
@@ -56,7 +56,7 @@ async def get_trello_card_by_task_number(task_number: int):
         return None
 
 
-async def update_trello_card(card_id: str, updates: Dict[str, Any]):
+def update_trello_card(card_id: str, updates: Dict[str, Any]):
     """Update a Trello card with new information"""
     try:
         url = f"https://api.trello.com/1/cards/{card_id}"
@@ -77,7 +77,7 @@ async def update_trello_card(card_id: str, updates: Dict[str, Any]):
         return False
 
 
-async def get_trello_lists():
+def get_trello_lists():
     """Get all lists on the board"""
     try:
         # Get board ID first
@@ -115,7 +115,7 @@ async def get_trello_lists():
         logger.error(f"Error getting Trello lists: {e}")
         return {}
 
-async def create_trello_list(board_id: str, list_name: str, position: str = "bottom"):
+def create_trello_list(board_id: str, list_name: str, position: str = "bottom"):
     """Create a new list on a Trello board"""
     try:
         url = f"https://api.trello.com/1/boards/{board_id}/lists"
@@ -132,7 +132,7 @@ async def create_trello_list(board_id: str, list_name: str, position: str = "bot
         logger.error(f"Error creating Trello list: {e}")
         return None
 
-async def archive_trello_list(list_id: str):
+def archive_trello_list(list_id: str):
     """Archive a Trello list"""
     try:
         url = f"https://api.trello.com/1/lists/{list_id}/closed"
@@ -148,7 +148,7 @@ async def archive_trello_list(list_id: str):
         logger.error(f"Error archiving Trello list: {e}")
         return False
 
-async def get_list_id_for_videographer(board_id: str, videographer_name: str):
+def get_list_id_for_videographer(board_id: str, videographer_name: str):
     """Get Trello list ID for a videographer"""
     try:
         url = f"https://api.trello.com/1/boards/{board_id}/lists"
@@ -249,7 +249,7 @@ def create_checklist_with_dates(card_id: str, filming_date: datetime) -> bool:
         logger.error(f"Error creating checklist: {e}")
         return False
 
-async def update_checklist_dates(card_id: str, new_filming_date: datetime) -> bool:
+def update_checklist_dates(card_id: str, new_filming_date: datetime) -> bool:
     """Update checklist dates when filming date changes"""
     try:
         # Get all checklists on the card
