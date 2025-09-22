@@ -528,7 +528,8 @@ async def slack_interactive(request: Request):
                 return JSONResponse({"ok": True})
             
             # Handle video approval workflow actions
-            elif action_id in ["approve_video_reviewer", "reject_video_reviewer", "approve_video_hos", "reject_video_hos"]:
+            elif action_id in ["approve_video_reviewer", "reject_video_reviewer", "approve_video_hos", "reject_video_hos", 
+                               "approve_video_workflow", "reject_video_workflow", "approve_video_sales_workflow", "return_video_sales_workflow"]:
                 workflow_id = action.get("value")
                 
                 from video_upload_system import (
@@ -632,6 +633,71 @@ async def slack_interactive(request: Request):
                             })
                         }
                     )
+                # Handle the new workflow-based actions from send_reviewer_approval and send_sales_approval
+                elif action_id == "approve_video_workflow":
+                    # Similar to approve_video_reviewer
+                    requests.post(response_url, json={
+                        "replace_original": True,
+                        "text": "⏳ Please wait... Processing approval..."
+                    })
+                    asyncio.create_task(handle_reviewer_approval(workflow_id, user_id, response_url))
+                elif action_id == "reject_video_workflow":
+                    # Similar to reject_video_reviewer
+                    from video_upload_system import get_workflow_with_cache
+                    workflow = await get_workflow_with_cache(workflow_id) or {}
+                    task_number = workflow.get('task_number', 'Unknown')
+                    
+                    await slack_client.views_open(
+                        trigger_id=payload["trigger_id"],
+                        view={
+                            "type": "modal",
+                            "callback_id": f"reject_video_modal_{workflow_id}",
+                            "title": {"type": "plain_text", "text": "Reject Video"},
+                            "blocks": [
+                                {
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": f"Please provide a reason for rejecting the video for Task #{task_number}"
+                                    }
+                                },
+                                {
+                                    "type": "input",
+                                    "block_id": "rejection_reason",
+                                    "label": {"type": "plain_text", "text": "Rejection Reason"},
+                                    "element": {
+                                        "type": "plain_text_input",
+                                        "action_id": "reason_input",
+                                        "multiline": True,
+                                        "placeholder": {"type": "plain_text", "text": "Enter the reason for rejection..."}
+                                    }
+                                }
+                            ],
+                            "submit": {"type": "plain_text", "text": "Submit"},
+                            "close": {"type": "plain_text", "text": "Cancel"},
+                            "private_metadata": json.dumps({
+                                "workflow_id": workflow_id,
+                                "response_url": response_url,
+                                "stage": "reviewer"
+                            })
+                        }
+                    )
+                elif action_id == "approve_video_sales_workflow":
+                    # Handle sales approval
+                    from video_upload_system import handle_sales_approval
+                    requests.post(response_url, json={
+                        "replace_original": True,
+                        "text": "⏳ Please wait... Processing sales approval..."
+                    })
+                    asyncio.create_task(handle_sales_approval(workflow_id, user_id, response_url))
+                elif action_id == "return_video_sales_workflow":
+                    # Handle sales return
+                    from video_upload_system import handle_sales_rejection
+                    requests.post(response_url, json={
+                        "replace_original": True,
+                        "text": "⏳ Please wait... Processing return request..."
+                    })
+                    asyncio.create_task(handle_sales_rejection(workflow_id, user_id, response_url))
                 
                 return JSONResponse({"text": "Processing..."})
     

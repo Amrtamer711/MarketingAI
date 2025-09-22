@@ -83,8 +83,7 @@ from db_utils import (
     get_all_pending_workflows_async
 )
 
-# Approval tracking - workflows persist in database, pending_approvals still in-memory
-pending_approvals = {}  # message_ts -> approval_data
+# Approval tracking - workflows persist in database
 approval_workflows = {}  # workflow_id -> workflow_data (cache for active workflows)
 
 async def get_workflow_with_cache(workflow_id: str) -> Optional[Dict[str, Any]]:
@@ -815,6 +814,39 @@ async def send_reviewer_approval(channel: str, filename: str, dropbox_path: str,
         if not reviewer_channel:
             reviewer_channel = channel  # Fallback to current channel
         
+        # Extract task number from filename or task_data
+        task_number = task_data.get('Task #', 0) if task_data else 0
+        if not task_number:
+            # Try to extract from filename
+            task_match = re.search(r'Task(\d+)_', filename)
+            if task_match:
+                task_number = int(task_match.group(1))
+        
+        # Create workflow ID
+        workflow_id = f"video_approval_{task_number}_{datetime.now().timestamp()}"
+        
+        # Get version from filename
+        version_match = re.search(r'_(\d+)\.', filename)
+        version = int(version_match.group(1)) if version_match else 1
+        
+        # Store workflow data
+        workflow_data = {
+            "task_number": task_number,
+            "filename": filename,
+            "dropbox_path": dropbox_path,
+            "uploader": uploader,
+            "upload_channel": channel,
+            "task_data": task_data,
+            "stage": "reviewer",
+            "created_at": datetime.now(UAE_TZ).isoformat(),
+            "version": version,
+            "status": "pending"
+        }
+        
+        # Save to database and cache
+        approval_workflows[workflow_id] = workflow_data
+        await save_workflow_async(workflow_id, workflow_data)
+        
         # Create approval message with buttons
         blocks = [
             {
@@ -846,27 +878,15 @@ async def send_reviewer_approval(channel: str, filename: str, dropbox_path: str,
                     "type": "button",
                     "text": {"type": "plain_text", "text": "✅ Accept"},
                     "style": "primary",
-                    "action_id": "approve_video",
-                    "value": json.dumps({
-                        "filename": filename,
-                        "path": dropbox_path,
-                        "action": "accept",
-                        "stage": "reviewer",
-                        "task_data": task_data
-                    })
+                    "action_id": "approve_video_workflow",
+                    "value": workflow_id
                 },
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "❌ Reject"},
                     "style": "danger",
-                    "action_id": "reject_video",
-                    "value": json.dumps({
-                        "filename": filename,
-                        "path": dropbox_path,
-                        "action": "reject",
-                        "stage": "reviewer",
-                        "task_data": task_data
-                    })
+                    "action_id": "reject_video_workflow",
+                    "value": workflow_id
                 }
             ]
         })
@@ -878,15 +898,10 @@ async def send_reviewer_approval(channel: str, filename: str, dropbox_path: str,
             blocks=blocks
         )
         
-        # Track approval
-        pending_approvals[result["ts"]] = {
-            "filename": filename,
-            "path": dropbox_path,
-            "stage": "reviewer",
-            "task_data": task_data,
-            "uploader": uploader,
-            "upload_channel": channel
-        }
+        # Save message timestamp for recovery
+        workflow_data['reviewer_msg_ts'] = result['ts']
+        approval_workflows[workflow_id] = workflow_data
+        await save_workflow_async(workflow_id, workflow_data)
         
     except Exception as e:
         logger.error(f"Error sending reviewer approval: {e}")
@@ -943,6 +958,38 @@ async def send_sales_approval(filename: str, dropbox_path: str, task_data: Dict,
         # Get sales person's Slack channel/user ID
         sales_channel = await get_sales_person_channel(sales_person)
         
+        # Extract task number from filename or task_data
+        task_number = task_data.get('Task #', 0) if task_data else 0
+        if not task_number:
+            # Try to extract from filename
+            task_match = re.search(r'Task(\d+)_', filename)
+            if task_match:
+                task_number = int(task_match.group(1))
+        
+        # Create workflow ID
+        workflow_id = f"sales_approval_{task_number}_{datetime.now().timestamp()}"
+        
+        # Get version from filename
+        version_match = re.search(r'_(\d+)\.', filename)
+        version = int(version_match.group(1)) if version_match else 1
+        
+        # Store workflow data
+        workflow_data = {
+            "task_number": task_number,
+            "filename": filename,
+            "dropbox_path": dropbox_path,
+            "sales_person": sales_person,
+            "task_data": task_data,
+            "stage": "sales",
+            "created_at": datetime.now(UAE_TZ).isoformat(),
+            "version": version,
+            "status": "pending"
+        }
+        
+        # Save to database and cache
+        approval_workflows[workflow_id] = workflow_data
+        await save_workflow_async(workflow_id, workflow_data)
+        
         # Create approval message
         blocks = [
             {
@@ -974,27 +1021,15 @@ async def send_sales_approval(filename: str, dropbox_path: str, task_data: Dict,
                     "type": "button",
                     "text": {"type": "plain_text", "text": "✅ Accept"},
                     "style": "primary",
-                    "action_id": "approve_video",
-                    "value": json.dumps({
-                        "filename": filename,
-                        "path": dropbox_path,
-                        "action": "accept",
-                        "stage": "sales",
-                        "task_data": task_data
-                    })
+                    "action_id": "approve_video_sales_workflow",
+                    "value": workflow_id
                 },
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "↩️ Return for Revision"},
                     "style": "danger",
-                    "action_id": "reject_video",
-                    "value": json.dumps({
-                        "filename": filename,
-                        "path": dropbox_path,
-                        "action": "return",
-                        "stage": "sales",
-                        "task_data": task_data
-                    })
+                    "action_id": "return_video_sales_workflow",
+                    "value": workflow_id
                 }
             ]
         })
@@ -1006,14 +1041,10 @@ async def send_sales_approval(filename: str, dropbox_path: str, task_data: Dict,
             blocks=blocks
         )
         
-        # Track approval
-        pending_approvals[result["ts"]] = {
-            "filename": filename,
-            "path": dropbox_path,
-            "stage": "sales",
-            "task_data": task_data,
-            "sales_person": sales_person
-        }
+        # Save message timestamp for recovery
+        workflow_data['sales_msg_ts'] = result['ts']
+        approval_workflows[workflow_id] = workflow_data
+        await save_workflow_async(workflow_id, workflow_data)
         
     except Exception as e:
         logger.error(f"Error sending sales approval: {e}")
@@ -1070,12 +1101,16 @@ async def handle_approval_action(action_data: Dict, user_id: str, response_url: 
         
         # Notify original uploader if rejected/returned
         if action in ["reject", "return"] and stage == "reviewer":
-            approval_data = pending_approvals.get(action_data.get("message_ts"))
-            if approval_data and approval_data.get("upload_channel"):
-                await slack_client.chat_postMessage(
-                    channel=approval_data["upload_channel"],
-                    text=f"📹 Your video `{filename}` was rejected by the reviewer. Please check and resubmit."
-                )
+            # Look for the workflow to get upload channel
+            for workflow_id, workflow in approval_workflows.items():
+                if workflow.get('filename') == filename and workflow.get('stage') == 'reviewer':
+                    upload_channel = workflow.get('upload_channel')
+                    if upload_channel:
+                        await slack_client.chat_postMessage(
+                            channel=upload_channel,
+                            text=f"📹 Your video `{filename}` was rejected by the reviewer. Please check and resubmit."
+                        )
+                    break
         
     except Exception as e:
         logger.error(f"Error handling approval action: {e}")
