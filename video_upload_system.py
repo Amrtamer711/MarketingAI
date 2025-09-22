@@ -1287,13 +1287,9 @@ async def update_excel_status(task_number: int, folder: str, version: Optional[i
             logger.error(f"Failed to update DB status for task {task_number}")
             return
         
-        # If status is "Done", archive the task and remove from Excel
-        if new_status == "Done":
-            from db_utils import archive_task
-            archive_task(task_number)
-            logger.info(f"✅ Task #{task_number} moved to history DB and removed from Excel")
-        else:
-            logger.info(f"✅ Updated Task #{task_number} status to: {new_status}")
+        # Log the status update
+        logger.info(f"✅ Updated Task #{task_number} status to: {new_status}")
+        # Note: Archiving is handled by archive_and_remove_completed_task() when needed
         
     except Exception as e:
         logger.error(f"Error updating Excel: {e}")
