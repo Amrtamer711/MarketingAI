@@ -10,7 +10,6 @@ import os
 import re
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 import dropbox
@@ -712,10 +711,8 @@ async def handle_video_upload(channel: str, user_id: str, file_info: Dict[str, A
             if reference_number:
                 # Check for existing videos in both Dropbox and Excel
                 existing_videos = await check_existing_videos(task_number, reference_number)
-                existing_in_excel = await check_videos_in_excel(reference_number)
-                
-                # Combine both sources
-                all_existing = existing_videos + existing_in_excel
+                # Check for existing videos in Dropbox
+                all_existing = existing_videos
                 
                 if all_existing:
                     # Generate appropriate filename with next letter
@@ -1310,16 +1307,10 @@ async def update_excel_status(task_number: int, folder: str, version: Optional[i
     except Exception as e:
         logger.error(f"Error updating Excel: {e}")
 
-async def check_videos_in_excel(reference_number: str) -> list:
-    """Deprecated Excel check; DB now prevents duplicates via unique reference."""
-    return []
 
 async def update_trello_status(task_number: int, folder: str):
     """Update Trello card based on video status"""
     try:
-        # Import necessary modules
-        import sys
-        sys.path.append(str(Path(__file__).parent))
         from trello_utils import get_trello_card_by_task_number, set_trello_due_complete, archive_trello_card
         
         card = await asyncio.to_thread(get_trello_card_by_task_number, task_number)
@@ -1814,7 +1805,7 @@ async def handle_reviewer_rejection(workflow_id: str, user_id: str, response_url
         from_path = workflow['dropbox_path']
         to_path = f"{DROPBOX_FOLDERS['rejected']}/{filename}"
         
-        result = dropbox_manager.dbx.files_move_v2(from_path, to_path)
+        dropbox_manager.dbx.files_move_v2(from_path, to_path)
         
         # Update status with rejection info
         await update_excel_status(task_number, "Rejected", version=version,
@@ -2064,7 +2055,7 @@ async def handle_sales_rejection(workflow_id: str, user_id: str, response_url: s
         from_path = workflow['dropbox_path']
         to_path = f"{DROPBOX_FOLDERS['returned']}/{filename}"
         
-        result = dropbox_manager.dbx.files_move_v2(from_path, to_path)
+        dropbox_manager.dbx.files_move_v2(from_path, to_path)
         
         # Update status with rejection info
         await update_excel_status(task_number, "Returned", version=version,
@@ -2073,7 +2064,6 @@ async def handle_sales_rejection(workflow_id: str, user_id: str, response_url: s
                                 rejected_by="Sales")
         
         # Also update returned timestamp since this is a sales rejection
-        # update_movement_timestamp is deprecated, timestamps are updated via status update
         # Timestamp is now handled by update_excel_status above
         
         # Get the video link from the new location
@@ -2273,7 +2263,7 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
         from_path = workflow['dropbox_path']
         to_path = f"{DROPBOX_FOLDERS['accepted']}/{filename}"
         
-        result = dropbox_manager.dbx.files_move_v2(from_path, to_path)
+        dropbox_manager.dbx.files_move_v2(from_path, to_path)
         
         # Get version from filename
         version_match = re.search(r'_(\d+)\.', filename)
@@ -2416,7 +2406,7 @@ async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str
         from_path = workflow['dropbox_path']
         to_path = f"{DROPBOX_FOLDERS['returned']}/{filename}"
         
-        result = dropbox_manager.dbx.files_move_v2(from_path, to_path)
+        dropbox_manager.dbx.files_move_v2(from_path, to_path)
         
         # Update status with rejection info
         await update_excel_status(task_number, "Returned", version=version,
@@ -2425,7 +2415,6 @@ async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str
                                 rejected_by="Head of Sales")
         
         # Update returned timestamp
-        # update_movement_timestamp is deprecated, timestamps are updated via status update
         # Timestamp is now handled by update_excel_status above
         
         # Get the video link from returned folder
