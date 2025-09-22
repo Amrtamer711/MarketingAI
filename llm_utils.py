@@ -340,8 +340,8 @@ CRITICAL VALIDATION RULES - YOU MUST ENFORCE:
    - "Submitted to Sales"
    - "Returned"
    - "Done"
-   - "Permanently Rejected" (WARNING: This will archive the task and reject all videos)
-   Auto-map: "Accepted"→"Done", "Completed"→"Done", "Rejected"→"Editing", "Pending"→"Critique", "Permanent"→"Permanently Rejected", "Perm Reject"→"Permanently Rejected"
+   - "Permanently Rejected" (WARNING: This will archive the task and reject all videos so always warn the user before proceeding)
+   Auto-map: "Accepted"→"Done", "Completed"→"Done", "Rejected"→"Editing", "Pending"→"Critique", "Permanent"→"Permanently Rejected", "Perm Reject"→"Permanently Rejected", "permanently rejected"→"Permanently Rejected", "perm rejected"→"Permanently Rejected"
    If user tries to set other values: keep current value, tell user valid options
 
 Return JSON with: action, fields (only changed fields with VALID values), message.
