@@ -2548,14 +2548,9 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                 logger.info(f"Moved {video['filename']} from {video['folder']} to rejected")
                 
                 # Update database status to Rejected
-                await update_excel_status(
-                    task_number, 
-                    "Rejected", 
-                    version=video['version'],
-                    rejection_reason=f"Auto-rejected: Version {accepted_version} was accepted",
-                    rejection_class="Other Version Accepted",
-                    rejected_by="System"
-                )
+                # Note: We skip this update because the task is already marked as Done/accepted
+                # and may have been archived. The rejection is only recorded in the file move.
+                logger.info(f"Video {video['filename']} v{video['version']} auto-rejected (version {accepted_version} was accepted)")
                 
                 # Find and cancel any active workflows for this video
                 for workflow_id, workflow in list(approval_workflows.items()):
@@ -2592,7 +2587,7 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                 if stage == 'reviewer' and workflow.get('reviewer_msg_ts'):
                     # Update reviewer message
                     reviewer_channel = (await get_reviewer_channel()) or workflow.get('reviewer_id')
-                    if reviewer_channel:
+                    if reviewer_channel and workflow.get('reviewer_msg_ts'):
                         try:
                             await slack_client.chat_update(
                                 channel=reviewer_channel,
@@ -2607,7 +2602,9 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                                 }]
                             )
                         except Exception as e:
-                            logger.warning(f"Could not update reviewer message: {e}")
+                            logger.warning(f"Could not update reviewer message for {workflow['filename']}: {e}")
+                    else:
+                        logger.debug(f"No reviewer message to update for workflow {workflow_id}")
                 
                 elif stage == 'hos' and workflow.get('hos_msg_ts'):
                     # Update HoS message
