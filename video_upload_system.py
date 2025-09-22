@@ -2339,13 +2339,7 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
                 ]
             )
         
-        # Update HoS message
-        requests.post(response_url, json={
-            "replace_original": True,
-            "text": f"✅ Video accepted and all parties notified\nTask #{task_number}: `{filename}`"
-        })
-        
-        # Attempt to clean up related Slack messages (mark resolved or delete buttons)
+        # Attempt to clean up related Slack messages by deleting them
         try:
             # Reviewer message
             reviewer_msg_ts = workflow.get('reviewer_msg_ts')
@@ -2358,19 +2352,12 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
                 reviewer_channel = workflow.get('reviewer_id') or (await get_reviewer_channel())
             if reviewer_msg_ts and reviewer_channel:
                 try:
-                    await slack_client.chat_update(
+                    await slack_client.chat_delete(
                         channel=reviewer_channel,
-                        ts=reviewer_msg_ts,
-                        text=f"✅ Resolved: Accepted by Head of Sales",
-                        blocks=[{
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": f"✅ *Resolved*\n\nTask #{task_number}: `{filename}` has been fully accepted. This thread is closed."}
-                        }]
+                        ts=reviewer_msg_ts
                     )
                 except Exception:
-                    # If cannot update (e.g., message already deleted), ignore
                     pass
-            # HoS message itself is already replaced via response_url
             # Sales message (if any)
             sales_msg_ts = workflow.get('sales_msg_ts')
             sales_channel = None
@@ -2380,14 +2367,9 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
                 sales_channel = None
             if sales_msg_ts and sales_channel:
                 try:
-                    await slack_client.chat_update(
+                    await slack_client.chat_delete(
                         channel=sales_channel,
-                        ts=sales_msg_ts,
-                        text=f"✅ Resolved: Accepted by Head of Sales",
-                        blocks=[{
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": f"✅ *Resolved*\n\nTask #{task_number}: `{filename}` has been fully accepted. This request is closed."}
-                        }]
+                        ts=sales_msg_ts
                     )
                 except Exception:
                     pass
@@ -2682,20 +2664,12 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                             reviewer_channel = workflow.get('reviewer_id') or (await get_reviewer_channel())
                         if reviewer_channel:
                             try:
-                                logger.debug(f"Attempting to update message in channel {reviewer_channel} with ts {workflow['reviewer_msg_ts']}")
-                                await slack_client.chat_update(
+                                logger.debug(f"Attempting to delete message in channel {reviewer_channel} with ts {workflow['reviewer_msg_ts']}")
+                                await slack_client.chat_delete(
                                     channel=reviewer_channel,
-                                    ts=workflow['reviewer_msg_ts'],
-                                    text=f"⚠️ This approval request is no longer valid - another version was accepted",
-                                    blocks=[{
-                                        "type": "section",
-                                        "text": {
-                                            "type": "mrkdwn",
-                                            "text": f"⚠️ *This approval request is no longer valid*\n\nTask #{task_number}: `{workflow['filename']}`\n\nAnother version (v{accepted_version}) has been accepted. This video has been moved to rejected."
-                                        }
-                                    }]
+                                    ts=workflow['reviewer_msg_ts']
                                 )
-                                logger.info(f"Successfully updated reviewer message for {workflow['filename']}")
+                                logger.info(f"Successfully deleted reviewer message for {workflow['filename']}")
                             except Exception as e:
                                 # Don't log as warning if it's just a message_not_found error
                                 if "message_not_found" in str(e):
@@ -2703,23 +2677,15 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                                 elif "channel_not_found" in str(e) and workflow.get('reviewer_id'):
                                     # Fallback: try updating using reviewer_id if channel_id failed
                                     try:
-                                        await slack_client.chat_update(
+                                        await slack_client.chat_delete(
                                             channel=workflow.get('reviewer_id'),
-                                            ts=workflow['reviewer_msg_ts'],
-                                            text=f"⚠️ This approval request is no longer valid - another version was accepted",
-                                            blocks=[{
-                                                "type": "section",
-                                                "text": {
-                                                    "type": "mrkdwn",
-                                                    "text": f"⚠️ *This approval request is no longer valid*\n\nTask #{task_number}: `{workflow['filename']}`\n\nAnother version (v{accepted_version}) has been accepted. This video has been moved to rejected."
-                                                }
-                                            }]
+                                            ts=workflow['reviewer_msg_ts']
                                         )
-                                        logger.info(f"Fallback updated reviewer message for {workflow['filename']} using reviewer_id")
+                                        logger.info(f"Fallback deleted reviewer message for {workflow['filename']} using reviewer_id")
                                     except Exception as e2:
-                                        logger.warning(f"Fallback could not update reviewer message: {e2}")
+                                        logger.warning(f"Fallback could not delete reviewer message: {e2}")
                                 else:
-                                    logger.warning(f"Could not update reviewer message for {workflow['filename']}: {e}")
+                                    logger.warning(f"Could not delete reviewer message for {workflow['filename']}: {e}")
                         else:
                             logger.debug(f"No reviewer channel found for workflow {workflow_id}")
                     else:
@@ -2736,20 +2702,12 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                         hos_channel = workflow.get('hos_id')
                     if hos_channel:
                         try:
-                            await slack_client.chat_update(
+                            await slack_client.chat_delete(
                                 channel=hos_channel,
-                                ts=workflow['hos_msg_ts'],
-                                text=f"⚠️ This approval request is no longer valid - another version was accepted",
-                                blocks=[{
-                                    "type": "section",
-                                    "text": {
-                                        "type": "mrkdwn",
-                                        "text": f"⚠️ *This approval request is no longer valid*\n\nTask #{task_number}: `{workflow['filename']}`\n\nAnother version (v{accepted_version}) has been accepted. This video has been moved to rejected."
-                                    }
-                                }]
+                                ts=workflow['hos_msg_ts']
                             )
                         except Exception as e:
-                            logger.warning(f"Could not update HoS message: {e}")
+                            logger.warning(f"Could not delete HoS message: {e}")
 
                 # Also handle sales stage messages, if present
                 if workflow.get('sales_msg_ts'):
@@ -2760,20 +2718,12 @@ async def cleanup_other_versions(task_number: int, accepted_version: int):
                         sales_channel = None
                     if sales_channel:
                         try:
-                            await slack_client.chat_update(
+                            await slack_client.chat_delete(
                                 channel=sales_channel,
-                                ts=workflow['sales_msg_ts'],
-                                text=f"⚠️ This approval request is no longer valid - another version was accepted",
-                                blocks=[{
-                                    "type": "section",
-                                    "text": {
-                                        "type": "mrkdwn",
-                                        "text": f"⚠️ *This approval request is no longer valid*\n\nTask #{task_number}: `{workflow['filename']}`\n\nAnother version (v{accepted_version}) has been accepted. This video has been moved to rejected."
-                                    }
-                                }]
+                                ts=workflow['sales_msg_ts']
                             )
                         except Exception as e:
-                            logger.warning(f"Could not update Sales message: {e}")
+                            logger.warning(f"Could not delete Sales message: {e}")
                 
                 # Remove workflow from cache and database
                 if workflow_id in approval_workflows:
