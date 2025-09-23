@@ -65,12 +65,74 @@ services:
       mountPath: /data
       sizeGB: 5
 
-  # Cron job for daily task assignment
+  # Cron job for 8 AM task assignment
   - type: cron
-    name: task-assignment
+    name: task-assignment-8am
     runtime: python
     region: singapore
     schedule: "0 4 * * 1-5"   # Mon–Fri 04:00 UTC (08:00 UAE)
+    buildCommand: pip install requests
+    startCommand: |
+      python -c "
+      import requests
+      import json
+      import sys
+      
+      url = 'https://videocritique-bot-ob8k.onrender.com/internal/run-assignment'
+      print(f'Calling assignment endpoint: {url}')
+      
+      try:
+          response = requests.post(url, timeout=300)
+          response.raise_for_status()
+          result = response.json()
+          print(f'Success! Assignments made: {result.get(\"assignments_made\", 0)}')
+          print(f'Response: {json.dumps(result, indent=2)}')
+      except requests.exceptions.RequestException as e:
+          print(f'Error calling assignment endpoint: {e}')
+          if hasattr(e, 'response') and e.response is not None:
+              print(f'Response body: {e.response.text}')
+          sys.exit(1)
+      "
+    envVars:
+      - fromGroup: videocritique-shared
+
+  # Cron job for 12 PM task assignment
+  - type: cron
+    name: task-assignment-12pm
+    runtime: python
+    region: singapore
+    schedule: "0 8 * * 1-5"   # Mon–Fri 08:00 UTC (12:00 UAE)
+    buildCommand: pip install requests
+    startCommand: |
+      python -c "
+      import requests
+      import json
+      import sys
+      
+      url = 'https://videocritique-bot-ob8k.onrender.com/internal/run-assignment'
+      print(f'Calling assignment endpoint: {url}')
+      
+      try:
+          response = requests.post(url, timeout=300)
+          response.raise_for_status()
+          result = response.json()
+          print(f'Success! Assignments made: {result.get(\"assignments_made\", 0)}')
+          print(f'Response: {json.dumps(result, indent=2)}')
+      except requests.exceptions.RequestException as e:
+          print(f'Error calling assignment endpoint: {e}')
+          if hasattr(e, 'response') and e.response is not None:
+              print(f'Response body: {e.response.text}')
+          sys.exit(1)
+      "
+    envVars:
+      - fromGroup: videocritique-shared
+
+  # Cron job for 4 PM task assignment
+  - type: cron
+    name: task-assignment-4pm
+    runtime: python
+    region: singapore
+    schedule: "0 12 * * 1-5"   # Mon–Fri 12:00 UTC (16:00 UAE)
     buildCommand: pip install requests
     startCommand: |
       python -c "
