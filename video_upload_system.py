@@ -740,144 +740,6 @@ def generate_file_name_in_folder(task_data: Dict[str, Any], user_name: str, vers
     task_number = task_data.get('Task #', task_data.get('task_number', ''))
     return f"Task{task_number}_V{version}_{file_index}.{file_extension}"
 
-async def handle_folder_upload_by_task_number(channel: str, user_id: str, file_infos: List[Dict[str, Any]], task_number: int, destination_folder: str):
-    """Handle multiple file uploads as a single submission folder"""
-    try:
-        # Check permissions
-        has_permission, error_msg = simple_check_permission(user_id, "upload_video")
-        if not has_permission:
-            await slack_client.chat_postMessage(
-                channel=channel,
-                text=error_msg
-            )
-            return False
-
-        # Get task data first
-        task_data = await get_task_data(task_number)
-        if not task_data:
-            await slack_client.chat_postMessage(
-                channel=channel,
-                text=f"❌ Task #{task_number} not found. Please check the task number."
-            )
-            return False
-
-        # Check campaign end date
-        campaign_end_date = task_data.get('Campaign End Date')
-        if campaign_end_date:
-            try:
-                end_date = pd.to_datetime(campaign_end_date).date()
-                today = datetime.now(UAE_TZ).date()
-
-                if end_date < today:
-                    await slack_client.chat_postMessage(
-                        channel=channel,
-                        text=f"❌ Cannot upload files: Campaign for Task #{task_number} ended on {end_date}. Please check with your supervisor."
-                    )
-                    return False
-            except Exception as e:
-                logger.warning(f"Error parsing campaign end date: {e}")
-
-        # Get user info
-        user_info = await slack_client.users_info(user=user_id)
-        user_name = user_info["user"]["profile"].get("real_name", "Unknown")
-
-        # Get latest version number (excluding accepted folder)
-        latest_version = await get_latest_version_number(task_number, exclude_accepted=True)
-        new_version = latest_version + 1
-
-        # Generate folder name
-        folder_name = generate_folder_name(task_data, user_name, new_version)
-
-        # Create folder in Dropbox and upload all files
-        uploaded_files = []
-        for file_index, file_info in enumerate(file_infos, 1):
-            # Get file details
-            file_id = file_info.get("id")
-            original_file_name = file_info.get("name", f"file_{file_index}.mp4")
-            file_extension = original_file_name.split('.')[-1] if '.' in original_file_name else 'mp4'
-
-            # Get full file info from Slack
-            file_response = await slack_client.files_info(file=file_id)
-            if not file_response["ok"]:
-                raise Exception(f"Failed to get file info for file {file_index}: {file_response}")
-
-            file_data = file_response["file"]
-            file_url = file_data.get("url_private_download") or file_data.get("url_private")
-
-            # Download file from Slack
-            headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
-            response = requests.get(file_url, headers=headers, stream=True)
-            response.raise_for_status()
-
-            # Read file content
-            file_content = response.content
-
-            # Generate file name within folder
-            file_name_in_folder = generate_file_name_in_folder(task_data, user_name, new_version, file_index, file_extension)
-
-            # Upload to Dropbox under folder structure
-            dropbox_path = await dropbox_manager.upload_file_to_folder(
-                file_content,
-                file_name_in_folder,
-                folder_name,
-                destination_folder
-            )
-
-            uploaded_files.append({
-                'original_name': original_file_name,
-                'dropbox_name': file_name_in_folder,
-                'dropbox_path': dropbox_path
-            })
-
-        # Update database with folder information
-        await update_excel_status_with_folder(task_number, destination_folder, folder_name, version=new_version)
-
-        # Send appropriate notifications
-        files_summary = "\n".join([f"• {f['dropbox_name']}" for f in uploaded_files])
-
-        if destination_folder == "pending":
-            # Notify reviewer for approval
-            await send_reviewer_approval_for_folder(channel, folder_name, task_data, user_name, uploaded_files)
-            await slack_client.chat_postMessage(
-                channel=channel,
-                text=f"✅ Submission for Task #{task_number} uploaded successfully:\n\n**Folder:** `{folder_name}`\n**Files:**\n{files_summary}\n\n**Version:** {new_version}\n**Status:** Pending Review"
-            )
-        elif destination_folder == "raw":
-            await slack_client.chat_postMessage(
-                channel=channel,
-                text=f"✅ Submission for Task #{task_number} uploaded to Raw folder:\n\n**Folder:** `{folder_name}`\n**Files:**\n{files_summary}\n\n**Version:** {new_version}"
-            )
-
-        return True
-
-    except Exception as e:
-        logger.error(f"Error handling folder upload by task number: {e}")
-        await slack_client.chat_postMessage(
-            channel=channel,
-            text=f"❌ Error uploading submission: {str(e)}"
-        )
-        return False
-
-async def handle_video_upload_by_task_number(channel: str, user_id: str, file_info: Dict[str, Any], task_number: int, destination_folder: str):
-    """Handle single file upload by treating it as a folder with one file"""
-    # Convert single file to list and use folder handler
-    return await handle_folder_upload_by_task_number(channel, user_id, [file_info], task_number, destination_folder)
-
-async def handle_video_upload(channel: str, user_id: str, file_info: Dict[str, Any], destination_folder: str):
-    """Handle legacy video upload - redirect to folder-based system"""
-    # Extract task number from filename if possible
-    file_name = file_info.get("name", "")
-    task_number = extract_task_number(file_name)
-
-    if task_number:
-        # Use folder-based upload
-        return await handle_video_upload_by_task_number(channel, user_id, file_info, task_number, destination_folder)
-    else:
-        await slack_client.chat_postMessage(
-            channel=channel,
-            text="❌ Cannot determine task number from filename. Please use the format 'TaskX_...' or specify the task number in your message."
-        )
-        return False
 
 async def get_reviewer_channel() -> str:
     """Get the reviewer's Slack channel from config or env"""
@@ -1467,8 +1329,162 @@ async def parse_task_number_from_message(message: str) -> Optional[int]:
     
     return None
 
+async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any], task_number: int):
+    """Handle zip file upload, extract contents, rename folder and files, upload to Dropbox"""
+    import zipfile
+    import tempfile
+    import os
+
+    try:
+        # Get task data
+        task_data = await get_task_data(task_number)
+        if not task_data:
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text=f"❌ Task #{task_number} not found. Please check the task number."
+            )
+            return
+
+        # Get task number for folder naming
+        task_number = task_data.get('Task #', 0)
+
+        # Download zip file from Slack
+        await slack_client.chat_postMessage(
+            channel=channel,
+            text=f"📥 Processing zip file for Task #{task_number}..."
+        )
+
+        file_id = file_info.get("id")
+        file_response = await slack_client.files_info(file=file_id)
+        if not file_response["ok"]:
+            raise Exception("Failed to get zip file info")
+
+        file_data = file_response["file"]
+        file_url = file_data.get("url_private_download") or file_data.get("url_private")
+
+        # Download zip file content
+        headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+        import requests
+        response = requests.get(file_url, headers=headers)
+        if response.status_code != 200:
+            raise Exception(f"Failed to download zip file: {response.status_code}")
+
+        # Create temporary directory for extraction
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Save zip file temporarily
+            zip_path = os.path.join(temp_dir, "upload.zip")
+            with open(zip_path, 'wb') as f:
+                f.write(response.content)
+
+            # Extract zip file
+            extract_dir = os.path.join(temp_dir, "extracted")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+
+            # Get all files from extraction (recursively)
+            extracted_files = []
+            for root, dirs, files in os.walk(extract_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Skip hidden files and system files
+                    if not file.startswith('.') and not file.startswith('__MACOSX'):
+                        extracted_files.append(file_path)
+
+            if not extracted_files:
+                await slack_client.chat_postMessage(
+                    channel=channel,
+                    text="❌ No valid files found in the zip archive."
+                )
+                return
+
+            # Determine version number
+            highest_version = 0
+            base_folder_name = f"Task{task_number}"
+
+            # Check all folders for existing TaskX_VY folders
+            for folder_name, folder_path in DROPBOX_FOLDERS.items():
+                if folder_name == "raw":
+                    continue
+                try:
+                    result = dropbox_manager.dbx.files_list_folder(folder_path)
+                    while True:
+                        for entry in result.entries:
+                            if hasattr(entry, 'name') and entry.name.startswith(base_folder_name + "_V"):
+                                parts = entry.name.split('_V')
+                                if len(parts) == 2 and parts[-1].isdigit():
+                                    version = int(parts[-1])
+                                    highest_version = max(highest_version, version)
+                        if not result.has_more:
+                            break
+                        result = dropbox_manager.dbx.files_list_folder_continue(result.cursor)
+                except Exception as e:
+                    logger.warning(f"Error checking folder {folder_path}: {e}")
+
+            new_version = highest_version + 1
+            folder_name = f"Task{task_number}_V{new_version}"
+            folder_path = f"{DROPBOX_FOLDERS['pending']}/{folder_name}"
+
+            # Upload extracted files to Dropbox with indexing
+            uploaded_files = []
+            for index, file_path in enumerate(extracted_files, 1):
+                try:
+                    with open(file_path, 'rb') as f:
+                        file_content = f.read()
+
+                    # Get original filename and add index
+                    original_filename = os.path.basename(file_path)
+                    name_part, extension = original_filename.rsplit('.', 1) if '.' in original_filename else (original_filename, 'unknown')
+                    indexed_filename = f"{name_part}_{index}.{extension}"
+
+                    # Upload to Dropbox
+                    dropbox_path = f"{folder_path}/{indexed_filename}"
+                    dropbox_manager.dbx.files_upload(
+                        file_content,
+                        dropbox_path,
+                        mode=dropbox.files.WriteMode.overwrite,
+                        autorename=True
+                    )
+
+                    uploaded_files.append({
+                        "filename": indexed_filename,
+                        "path": dropbox_path,
+                        "original_name": original_filename
+                    })
+
+                    logger.info(f"Uploaded {indexed_filename} from zip to {dropbox_path}")
+
+                except Exception as e:
+                    logger.error(f"Error uploading file {file_path}: {e}")
+                    continue
+
+            if not uploaded_files:
+                await slack_client.chat_postMessage(
+                    channel=channel,
+                    text="❌ Failed to upload any files from the zip archive."
+                )
+                return
+
+            # Update Excel status
+            await update_excel_status_with_folder(task_number, "Pending", folder_name, version=new_version)
+
+            # Send to reviewer for approval
+            await send_folder_to_reviewer(task_number, folder_name, folder_path, user_id, task_data, uploaded_files)
+
+            uploaded_count = len(uploaded_files)
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text=f"✅ Successfully extracted and uploaded {uploaded_count} file{'s' if uploaded_count > 1 else ''} from zip to folder `{folder_name}`!\n📁 Location: Pending folder\n🔍 Sent to reviewer for approval"
+            )
+
+    except Exception as e:
+        logger.error(f"Error processing zip upload: {e}")
+        await slack_client.chat_postMessage(
+            channel=channel,
+            text=f"❌ Error processing zip file: {str(e)}"
+        )
+
 async def handle_multiple_video_uploads_with_parsing(channel: str, user_id: str, files_info: List[Dict[str, Any]], message: str):
-    """Handle multiple video/image uploads with task number parsing from message"""
+    """Handle zip file uploads only - no individual files accepted"""
     try:
         # Check permissions
         has_permission, error_msg = simple_check_permission(user_id, "upload_video")
@@ -1487,140 +1503,25 @@ async def handle_multiple_video_uploads_with_parsing(channel: str, user_id: str,
                 text="❌ Please include the task number in your message (e.g., 'Task #5' or 'task 5')"
             )
             return
-        
-        # Get task data
-        task_data = await get_task_data(task_number)
-        if not task_data:
+
+        # Only accept zip files
+        if len(files_info) == 1 and files_info[0].get('name', '').lower().endswith('.zip'):
+            await handle_zip_upload(channel, user_id, files_info[0], task_number)
+            return
+        else:
+            # Reject all non-zip uploads
+            file_names = [f.get('name', 'unknown') for f in files_info]
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"❌ Task #{task_number} not found. Please check the task number."
+                text=f"❌ **Only ZIP files are accepted for upload.**\n\n📦 Please zip your files and upload a single .zip file.\n\n*Rejected files:* {', '.join(file_names)}\n\n💡 **Instructions:**\n1. Select all your video/image files\n2. Right-click → Create Archive/Add to ZIP\n3. Upload the .zip file with your task number"
             )
             return
 
-        # Get task number for simplified naming
-        task_number = task_data.get('Task #', 0)
-
-        # Check existing versions to get next version number
-        highest_version = 0
-        base_folder_name = f"Task{task_number}"
-
-        # Check all folders for existing TaskX_VY folders
-        for folder_name, folder_path in DROPBOX_FOLDERS.items():
-            if folder_name == "raw":  # Skip raw folder
-                continue
-
-            try:
-                result = dropbox_manager.dbx.files_list_folder(folder_path)
-
-                while True:
-                    for entry in result.entries:
-                        if hasattr(entry, 'name') and entry.name.startswith(base_folder_name + "_V"):
-                            # Extract version number from folder name
-                            # Format: TaskX_VY
-                            parts = entry.name.split('_V')
-                            if len(parts) == 2 and parts[-1].isdigit():
-                                version = int(parts[-1])
-                                highest_version = max(highest_version, version)
-
-                    if not result.has_more:
-                        break
-                    result = dropbox_manager.dbx.files_list_folder_continue(result.cursor)
-
-            except Exception as e:
-                logger.warning(f"Error checking folder {folder_path}: {e}")
-
-        # Next version
-        new_version = highest_version + 1
-
-        # Create folder name: TaskX_VY
-        folder_name = f"Task{task_number}_V{new_version}"
-
-        # Notify user about upload
-        file_count = len(files_info)
-        file_names = [f.get('name', 'unknown') for f in files_info]
-
-        await slack_client.chat_postMessage(
-            channel=channel,
-            text=f"📤 Uploading {file_count} file{'s' if file_count > 1 else ''} for Task #{task_number}\n📁 Folder: `{folder_name}`\n📄 Files: {', '.join(file_names)}"
-        )
-
-        # Create folder in Dropbox Pending directory
-        folder_path = f"{DROPBOX_FOLDERS['pending']}/{folder_name}"
-
-        # Process each file with indexing
-        uploaded_files = []
-        for index, file_info in enumerate(files_info, 1):
-            try:
-                # Download file from Slack
-                file_id = file_info.get("id")
-                file_response = await slack_client.files_info(file=file_id)
-                if not file_response["ok"]:
-                    logger.error(f"Failed to get file info for {file_info.get('name')}")
-                    continue
-
-                file_data = file_response["file"]
-                file_url = file_data.get("url_private_download") or file_data.get("url_private")
-
-                # Download file content
-                headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
-                import requests
-                response = requests.get(file_url, headers=headers)
-                if response.status_code != 200:
-                    logger.error(f"Failed to download file {file_info.get('name')}: {response.status_code}")
-                    continue
-
-                file_content = response.content
-
-                # Create indexed filename
-                original_filename = file_info.get("name", f"file{index}.mp4")
-                name_part, extension = original_filename.rsplit('.', 1) if '.' in original_filename else (original_filename, 'mp4')
-                indexed_filename = f"{name_part}_{index}.{extension}"
-
-                # Upload to folder
-                file_path = f"{folder_path}/{indexed_filename}"
-                upload_result = await dropbox_manager.dbx.files_upload(
-                    file_content,
-                    file_path,
-                    mode=dropbox.files.WriteMode.overwrite,
-                    autorename=True
-                )
-
-                uploaded_files.append({
-                    "filename": indexed_filename,
-                    "path": file_path,
-                    "original_name": original_filename
-                })
-
-                logger.info(f"Uploaded {indexed_filename} to {file_path}")
-
-            except Exception as e:
-                logger.error(f"Error uploading file {file_info.get('name', 'unknown')}: {e}")
-                continue
-
-        if not uploaded_files:
-            await slack_client.chat_postMessage(
-                channel=channel,
-                text="❌ Failed to upload any files. Please try again."
-            )
-            return
-
-        # Update Excel status with the version number
-        await update_excel_status(task_number, "Pending", version=new_version)
-
-        # Send to reviewer for approval
-        await send_folder_to_reviewer(task_number, folder_name, folder_path, user_id, task_data, uploaded_files)
-
-        uploaded_count = len(uploaded_files)
-        await slack_client.chat_postMessage(
-            channel=channel,
-            text=f"✅ Successfully uploaded {uploaded_count} file{'s' if uploaded_count > 1 else ''} to folder `{folder_name}`!\n📁 Location: Pending folder\n🔍 Sent to reviewer for approval"
-        )
-        
     except Exception as e:
-        logger.error(f"Error processing video upload: {e}")
+        logger.error(f"Error processing upload: {e}")
         await slack_client.chat_postMessage(
             channel=channel,
-            text=f"❌ Error uploading video: {str(e)}"
+            text=f"❌ Error processing upload: {str(e)}\n\n📦 **Remember:** Only ZIP files are accepted for upload."
         )
 
 async def send_folder_to_reviewer(task_number: int, folder_name: str, folder_path: str, videographer_id: str, task_data: dict, uploaded_files: list):

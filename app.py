@@ -480,49 +480,11 @@ async def slack_interactive(request: Request):
                     file_name = value_data["file_name"]
                     action_type = value_data.get("action", "upload_video")
                     
-                    # Check if this is a task-based upload
-                    if action_type == "upload_video_by_task":
-                        task_number = value_data.get("task_number")
-                        
-                        # Import video upload system
-                        from video_upload_system import handle_video_upload_by_task_number
-                        
-                        # Get file info
-                        file_info = {
-                            "id": file_id,
-                            "name": file_name
-                        }
-                        
-                        # Process the upload with task number
-                        asyncio.create_task(
-                            handle_video_upload_by_task_number(channel, user_id, file_info, task_number, folder)
-                        )
-                        
-                        # Update the message
-                        await post_response_url(response_url, {
-                            "replace_original": True,
-                            "text": f"🎥 Processing upload for Task #{task_number} to {folder} folder..."
-                        })
-                    else:
-                        # Legacy upload without task number
-                        from video_upload_system import handle_video_upload
-                        
-                        # Get file info
-                        file_info = {
-                            "id": file_id,
-                            "name": file_name
-                        }
-                        
-                        # Process the upload
-                        asyncio.create_task(
-                            handle_video_upload(channel, user_id, file_info, folder)
-                        )
-                        
-                        # Update the message
-                        await post_response_url(response_url, {
-                            "replace_original": True,
-                            "text": f"🎥 Processing upload of `{file_name}` to {folder} folder..."
-                        })
+                    # Reject button-based uploads - ZIP only now
+                    await post_response_url(response_url, {
+                        "replace_original": True,
+                        "text": f"❌ **Button-based uploads are no longer supported.**\n\n📦 **Please use ZIP uploads only:**\n1. Zip your video/image files\n2. Upload the .zip file with a message containing the task number\n3. Example: 'Task #5 submission'\n\n*File rejected:* `{file_name}`"
+                    })
                     
                 except Exception as e:
                     logger.error(f"Error processing video folder selection: {e}")
