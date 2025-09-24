@@ -795,7 +795,7 @@ async def update_task(task_number: int, updates: Dict[str, Any], current_data: D
         
         # Trello updates
         if has_trello_card and trello_updates_needed:
-            trello_card = await get_trello_card_by_task_number(task_number)
+            trello_card = get_trello_card_by_task_number(task_number)
             if trello_card:
                 updated_data = current_data.copy()
                 updated_data.update(updates)
@@ -811,7 +811,7 @@ Videographer: {updated_data.get('Videographer', '')}"""
                 if 'Brand' in updates or 'Reference Number' in updates:
                     trello_payload['name'] = f"Task #{task_number}: {updated_data.get('Brand', '')} - {updated_data.get('Reference Number', '')}"
                 if 'assignee' in trello_updates:
-                    lists = await get_trello_lists()
+                    lists = get_trello_lists()
                     new_list_id = lists.get(trello_updates['assignee'])
                     if new_list_id:
                         trello_payload['idList'] = new_list_id
