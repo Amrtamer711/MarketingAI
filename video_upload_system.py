@@ -2446,10 +2446,16 @@ async def handle_folder_reviewer_approval(workflow_id: str, user_id: str, respon
 
         # Move folder to Submitted to Sales
         from_path = workflow['dropbox_path']
-        to_path = f"{DROPBOX_FOLDERS['submitted']}/{folder_name}"
+        logger.info(f"Moving folder from: {from_path} to submitted folder")
 
-        await dropbox_manager.move_folder(from_path, "submitted")
-        workflow['dropbox_path'] = to_path
+        try:
+            moved_path = await dropbox_manager.move_folder(from_path, "submitted")
+            workflow['dropbox_path'] = moved_path
+            logger.info(f"Successfully moved folder to: {moved_path}")
+        except Exception as e:
+            logger.error(f"Failed to move folder: {e}")
+            # Don't update path - keep original location so shared links work
+            logger.warning(f"Folder remains at original location: {from_path}")
 
         # Update workflow status
         workflow['reviewer_approved'] = True
@@ -2509,7 +2515,13 @@ async def handle_folder_reviewer_rejection(workflow_id: str, user_id: str, respo
 
         # Move folder to Rejected
         from_path = workflow['dropbox_path']
-        await dropbox_manager.move_folder(from_path, "rejected")
+        try:
+            moved_path = await dropbox_manager.move_folder(from_path, "rejected")
+            workflow['dropbox_path'] = moved_path
+            logger.info(f"Successfully moved folder to rejected: {moved_path}")
+        except Exception as e:
+            logger.error(f"Failed to move folder to rejected: {e}")
+            # Continue with workflow even if move fails
 
         # Update workflow status and delete
         workflow['status'] = 'rejected'
@@ -2647,7 +2659,13 @@ async def handle_folder_hos_approval(workflow_id: str, user_id: str, response_ur
 
         # Move folder to Accepted
         from_path = workflow['dropbox_path']
-        await dropbox_manager.move_folder(from_path, "accepted")
+        try:
+            moved_path = await dropbox_manager.move_folder(from_path, "accepted")
+            workflow['dropbox_path'] = moved_path
+            logger.info(f"Successfully moved folder to accepted: {moved_path}")
+        except Exception as e:
+            logger.error(f"Failed to move folder to accepted: {e}")
+            # Continue with workflow even if move fails
 
         # Update workflow status and clean up
         workflow['hos_approved'] = True
@@ -2707,7 +2725,13 @@ async def handle_folder_hos_rejection(workflow_id: str, user_id: str, response_u
 
         # Move folder to Returned
         from_path = workflow['dropbox_path']
-        await dropbox_manager.move_folder(from_path, "returned")
+        try:
+            moved_path = await dropbox_manager.move_folder(from_path, "returned")
+            workflow['dropbox_path'] = moved_path
+            logger.info(f"Successfully moved folder to returned: {moved_path}")
+        except Exception as e:
+            logger.error(f"Failed to move folder to returned: {e}")
+            # Continue with workflow even if move fails
 
         # Update workflow status and clean up
         workflow['status'] = 'returned'
