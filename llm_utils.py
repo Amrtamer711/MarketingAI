@@ -300,6 +300,7 @@ async def handle_design_request_confirmation(channel: str, user_id: str, user_na
     initial_msg += f"🔖 **Reference:** `{parsed_data['reference_number']}`\n"
     initial_msg += f"📍 **Location:** {parsed_data['location']}\n"
     initial_msg += f"💼 **Sales Person:** {parsed_data['sales_person']}\n"
+    initial_msg += f"🎬 **Task Type:** {parsed_data.get('task_type', 'videography')}\n"
     initial_msg += f"👤 **Submitted by:** _{user_name}_\n\n"
     initial_msg += "**Is this correct?** Please confirm to save or let me know what needs to be changed."
     
