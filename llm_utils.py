@@ -140,7 +140,7 @@ async def parse_image_with_ai(file_info: Dict[str, Any], text: str = "") -> Dict
         
         system_prompt = (
             "You extract design request fields from an image or PDF. "
-            "Return STRICT JSON with keys: brand, campaign_start_date, campaign_end_date, reference_number, location, sales_person. "
+            "Return STRICT JSON with keys: brand, campaign_start_date, campaign_end_date, reference_number, location, sales_person, task_type. "
             "Dates must be YYYY-MM-DD. Trim labels/punctuation.\n\n"
             "CRITICAL VALIDATION - YOU MUST ENFORCE:\n"
             f"1. sales_person MUST be mapped to one of: {list(mapping_cfg.get('sales_people', {}).keys())}\n"
@@ -149,7 +149,11 @@ async def parse_image_with_ai(file_info: Dict[str, Any], text: str = "") -> Dict
             f"2. location MUST be mapped to one of: {list(mapping_cfg.get('location_mappings', {}).keys())}\n"
             f"   Valid locations: {_format_locations_hint(mapping_cfg)}\n"
             f"   Auto-map: 'TTC' or 'Triple Crown' or 'The Triple Crown Dubai'→'TTC Dubai', 'Oryx'→'The Oryx', 'Gateway'→'The Gateway Dubai', '04'→'UAE 04'\n"
-            "3. If you cannot map to a valid value, extract the raw text as-is (it will be validated later)\n"
+            "3. task_type MUST be 'videography' or 'photography' - infer from document context:\n"
+            "   - Default to 'videography' unless clearly indicates photo/image work\n"
+            "   - Look for keywords: 'photo', 'image', 'photography', 'photoshoot'\n"
+            "   - Video keywords: 'video', 'footage', 'filming', 'shoot', 'production'\n"
+            "4. If you cannot map to a valid value, extract the raw text as-is (it will be validated later)\n"
             "ALWAYS attempt to map to the correct valid value when you recognize it."
         )
         
@@ -216,9 +220,14 @@ async def parse_image_with_ai(file_info: Dict[str, Any], text: str = "") -> Dict
                             "sales_person": {
                                 "type": "string",
                                 "description": "The sales person or contact name"
+                            },
+                            "task_type": {
+                                "type": "string",
+                                "description": "Task type: 'videography' or 'photography'",
+                                "enum": ["videography", "photography"]
                             }
                         },
-                        "required": ["brand", "campaign_start_date", "campaign_end_date", "reference_number", "location", "sales_person"],
+                        "required": ["brand", "campaign_start_date", "campaign_end_date", "reference_number", "location", "sales_person", "task_type"],
                         "additionalProperties": False
                     }
                 }
@@ -1119,6 +1128,7 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                         "reference_number": args["reference_number"],
                         "location": args.get("location", ""),
                         "sales_person": args.get("sales_person", ""),
+                        "task_type": args.get("task_type", "videography"),
                         "submitted_by": name
                     }
                     

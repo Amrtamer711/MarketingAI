@@ -12,9 +12,10 @@ functions = [
                 "campaign_end_date": {"type": "string", "description": "Campaign end date in YYYY-MM-DD format"},
                 "reference_number": {"type": "string", "description": "Reference number"},
                 "location": {"type": "string", "description": "Campaign location (required)"},
-                "sales_person": {"type": "string", "description": "Sales person name (required)"}
+                "sales_person": {"type": "string", "description": "Sales person name (required)"},
+                "task_type": {"type": "string", "description": "Task type: 'videography' or 'photography'", "enum": ["videography", "photography"], "default": "videography"}
             },
-            "required": ["brand", "campaign_start_date", "campaign_end_date", "reference_number", "location", "sales_person"]
+            "required": ["brand", "campaign_start_date", "campaign_end_date", "reference_number", "location", "sales_person", "task_type"]
         }
     },
     {

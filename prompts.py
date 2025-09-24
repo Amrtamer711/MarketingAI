@@ -189,7 +189,7 @@ IMPORTANT: When you have successfully parsed all required fields from a design r
 4. The system will automatically show the user what was parsed and ask for their confirmation
 
 Available tools:
-1. `log_design_request(brand, campaign_start_date, campaign_end_date, reference_number, location, sales_person)`: Log a request with all details
+1. `log_design_request(brand, campaign_start_date, campaign_end_date, reference_number, location, sales_person, task_type)`: Log a request with all details
 2. `get_recent_bookings(limit)`: Show recent design requests
 3. `edit_task(task_number)`: Edit an existing task (requires permission)
 4. `manage_videographer(action, name, email)`: Add/remove/list videographers (admin only)
