@@ -533,13 +533,16 @@ async def slack_interactive(request: Request):
                 return JSONResponse({"ok": True})
             
             # Handle video approval workflow actions
-            elif action_id in ["approve_video_reviewer", "reject_video_reviewer", "approve_video_hos", "reject_video_hos", 
-                               "approve_video_workflow", "reject_video_workflow", "approve_video_sales_workflow", "return_video_sales_workflow"]:
+            elif action_id in ["approve_video_reviewer", "reject_video_reviewer", "approve_video_hos", "reject_video_hos",
+                               "approve_video_workflow", "reject_video_workflow", "approve_video_sales_workflow", "return_video_sales_workflow",
+                               "approve_folder_reviewer", "reject_folder_reviewer", "approve_folder_hos", "reject_folder_hos"]:
                 workflow_id = action.get("value")
-                
+
                 from video_upload_system import (
                     handle_reviewer_approval, handle_reviewer_rejection,
-                    handle_hos_approval, handle_hos_rejection
+                    handle_hos_approval, handle_hos_rejection,
+                    handle_folder_reviewer_approval, handle_folder_reviewer_rejection,
+                    handle_folder_hos_approval, handle_folder_hos_rejection
                 )
                 
                 if action_id == "approve_video_reviewer":
@@ -602,7 +605,7 @@ async def slack_interactive(request: Request):
                     from video_upload_system import get_workflow_with_cache
                     workflow = await get_workflow_with_cache(workflow_id) or {}
                     task_number = workflow.get('task_number', 'Unknown')
-                    
+
                     await slack_client.views_open(
                         trigger_id=payload["trigger_id"],
                         view={
@@ -615,6 +618,43 @@ async def slack_interactive(request: Request):
                                     "text": {
                                         "type": "mrkdwn",
                                         "text": f"Please provide a reason for rejecting the video for Task #{task_number}"
+                                    }
+                                },
+                                {
+                                    "type": "input",
+                                    "block_id": "rejection_reason",
+                                    "label": {"type": "plain_text", "text": "Rejection Reason"},
+                                    "element": {
+                                        "type": "plain_text_input",
+                                        "action_id": "reason_input",
+
+                # Folder-based workflow handlers
+                elif action_id == "approve_folder_reviewer":
+                    await post_response_url(response_url, {
+                        "replace_original": True,
+                        "text": "⏳ Please wait... Processing folder approval..."
+                    })
+                    asyncio.create_task(
+                        handle_folder_reviewer_approval(workflow_id, user_id, response_url)
+                    )
+
+                elif action_id == "reject_folder_reviewer":
+                    from video_upload_system import get_workflow_with_cache
+                    workflow = await get_workflow_with_cache(workflow_id) or {}
+                    task_number = workflow.get('task_number', 'Unknown')
+
+                    await slack_client.views_open(
+                        trigger_id=payload["trigger_id"],
+                        view={
+                            "type": "modal",
+                            "callback_id": f"reject_folder_reviewer_modal_{workflow_id}",
+                            "title": {"type": "plain_text", "text": "Reject Submission"},
+                            "blocks": [
+                                {
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": f"Please provide a reason for rejecting the submission for Task #{task_number}"
                                     }
                                 },
                                 {

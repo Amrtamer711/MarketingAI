@@ -155,7 +155,7 @@ async def get_rejection_history(task_number: int, include_current: bool = False)
     """Get complete rejection/return history for a task from DB version history"""
     try:
         from db_utils import get_task_by_number as db_get
-        row = db_get_task = await asyncio.to_thread(lambda: db_get(task_number))
+        row = await asyncio.to_thread(lambda: db_get(task_number))
         if not row:
             return []
         version_history_json = row.get('Version History', '[]') or '[]'
@@ -443,28 +443,147 @@ class DropboxManager:
             except:
                 raise
     
-    async def move_file(self, from_path: str, to_folder: str) -> str:
-        """Move file from one folder to another"""
+    async def upload_file_to_folder(self, file_content: bytes, filename: str, folder_name: str, category_folder: str) -> str:
+        """Upload file to a specific folder within a category folder (Raw, Pending, etc.)"""
         # Ensure token is valid
         await self.ensure_valid_token()
-        
+
+        try:
+            # Get category folder path
+            category_path = DROPBOX_FOLDERS.get(category_folder)
+            if not category_path:
+                raise ValueError(f"Invalid category folder: {category_folder}")
+
+            # Create submission folder path
+            submission_folder_path = f"{category_path}/{folder_name}"
+
+            # Ensure submission folder exists
+            try:
+                self.dbx.files_create_folder_v2(submission_folder_path)
+                logger.info(f"Created folder: {submission_folder_path}")
+            except dropbox.exceptions.ApiError as e:
+                if e.error.is_path() and e.error.get_path().is_conflict():
+                    # Folder already exists, that's fine
+                    pass
+                else:
+                    raise
+
+            # Full file path
+            full_path = f"{submission_folder_path}/{filename}"
+
+            # Upload file using same logic as upload_video
+            file_size = len(file_content)
+            CHUNK_SIZE = 4 * 1024 * 1024  # 4MB chunks
+
+            if file_size <= CHUNK_SIZE:
+                # Small file, upload directly
+                result = self.dbx.files_upload(
+                    file_content,
+                    full_path,
+                    mode=dropbox.files.WriteMode.add,
+                    autorename=True,
+                    mute=True
+                )
+            else:
+                # Large file, use upload session
+                upload_session = self.dbx.files_upload_session_start(
+                    file_content[:CHUNK_SIZE]
+                )
+                cursor = dropbox.files.UploadSessionCursor(
+                    session_id=upload_session.session_id,
+                    offset=CHUNK_SIZE
+                )
+
+                # Upload remaining chunks
+                while cursor.offset < file_size:
+                    chunk_end = min(cursor.offset + CHUNK_SIZE, file_size)
+                    chunk = file_content[cursor.offset:chunk_end]
+
+                    if chunk_end < file_size:
+                        self.dbx.files_upload_session_append_v2(chunk, cursor)
+                        cursor.offset = chunk_end
+                    else:
+                        # Final chunk
+                        result = self.dbx.files_upload_session_finish(
+                            chunk,
+                            cursor,
+                            dropbox.files.CommitInfo(
+                                path=full_path,
+                                mode=dropbox.files.WriteMode.add,
+                                autorename=True,
+                                mute=True
+                            )
+                        )
+                        cursor.offset = file_size
+                        break
+
+            logger.info(f"✅ Uploaded {filename} to folder {submission_folder_path}")
+            return result.path_display
+
+        except Exception as e:
+            logger.error(f"Error uploading file to folder: {e}")
+            # Try refreshing token and retry once
+            try:
+                self._refresh_token()
+                return await self.upload_file_to_folder(file_content, filename, folder_name, category_folder)
+            except:
+                raise
+
+    async def move_folder(self, from_folder_path: str, to_category_folder: str) -> str:
+        """Move entire submission folder from one category to another"""
+        # Ensure token is valid
+        await self.ensure_valid_token()
+
+        try:
+            # Get folder name from path
+            folder_name = os.path.basename(from_folder_path)
+
+            # Destination category path
+            to_category_path = DROPBOX_FOLDERS.get(to_category_folder)
+            if not to_category_path:
+                raise ValueError(f"Invalid category folder: {to_category_folder}")
+
+            to_path = f"{to_category_path}/{folder_name}"
+
+            # Move folder
+            result = self.dbx.files_move_v2(from_folder_path, to_path)
+
+            logger.info(f"✅ Moved folder {folder_name} to {to_category_path}")
+            return result.metadata.path_display
+
+        except Exception as e:
+            logger.error(f"Error moving folder: {e}")
+            # Retry once after refreshing token
+            try:
+                self._refresh_token()
+                result = self.dbx.files_move_v2(from_folder_path, to_path)
+                logger.info(f"✅ Moved folder {folder_name} to {to_category_path} (after token refresh)")
+                return result.metadata.path_display
+            except Exception:
+                raise
+
+    async def move_file(self, from_path: str, to_folder: str) -> str:
+        """Move file from one folder to another (legacy method)"""
+        # Ensure token is valid
+        await self.ensure_valid_token()
+
         try:
             # Get filename from path
             filename = os.path.basename(from_path)
-            
+
             # Destination path
             to_folder_path = DROPBOX_FOLDERS.get(to_folder)
             if not to_folder_path:
                 raise ValueError(f"Invalid folder: {to_folder}")
-            
+
             to_path = f"{to_folder_path}/{filename}"
-            
+
             # Move file
             result = self.dbx.files_move_v2(from_path, to_path)
-            
+
             logger.info(f"✅ Moved {filename} to {to_folder_path}")
             return result.metadata.path_display
-            
+
         except Exception as e:
             logger.error(f"Error moving file: {e}")
             # Retry once after refreshing token
@@ -479,70 +598,150 @@ class DropboxManager:
 # Initialize Dropbox manager
 dropbox_manager = DropboxManager()
 
-async def check_existing_videos(task_number: int, reference_number: str) -> list:
-    """Check for existing videos with same reference number in Dropbox"""
-    existing_videos = []
+async def update_excel_status_with_folder(task_number: int, folder_category: str, folder_name: str, version: Optional[int] = None,
+                                          rejection_reason: Optional[str] = None, rejection_class: Optional[str] = None,
+                                          rejected_by: Optional[str] = None) -> bool:
+    """Update task status with folder information instead of filename"""
+    from db_utils import update_status_with_history_and_timestamp, update_task_by_number
+
     try:
-        # Ensure token is valid before checking
-        await dropbox_manager.ensure_valid_token()
-        for folder_name, folder_path in DROPBOX_FOLDERS.items():
-            try:
-                # List files in folder
-                result = dropbox_manager.dbx.files_list_folder(folder_path)
-                
-                # Check all files
-                while True:
-                    for entry in result.entries:
-                        if isinstance(entry, dropbox.files.FileMetadata):
-                            # Check if filename contains the reference number
-                            if reference_number in entry.name:
-                                existing_videos.append({
-                                    'filename': entry.name,
-                                    'folder': folder_name,
-                                    'path': entry.path_display
-                                })
-                    
-                    if not result.has_more:
-                        break
-                    result = dropbox_manager.dbx.files_list_folder_continue(result.cursor)
-                    
-            except Exception as e:
-                logger.warning(f"Error checking folder {folder_path}: {e}")
+        # Update the submission folder field
+        folder_updates = {"Submission Folder": folder_name}
+        from db_utils import update_task_by_number as db_update
+        await asyncio.to_thread(db_update, task_number, folder_updates)
+
+        # Update status with history
+        success = await asyncio.to_thread(
+            update_status_with_history_and_timestamp,
+            task_number, folder_category, version, rejection_reason, rejection_class, rejected_by
+        )
+
+        if success:
+            logger.info(f"✅ Updated Task #{task_number} status to {folder_category} with folder {folder_name}")
+        else:
+            logger.error(f"❌ Failed to update Task #{task_number} status")
+
+        return success
+
     except Exception as e:
-        logger.error(f"Error checking existing videos: {e}")
-    
-    return existing_videos
+        logger.error(f"Error updating Excel status with folder: {e}")
+        return False
 
-def extract_campaign_letter(filename: str) -> str:
-    """Extract campaign letter (A, B, C...) from filename"""
-    # Expected format: Ref_Location_Brand_MonthYY_Videographer_SalesPerson_Letter_Version
-    parts = filename.rsplit('.', 1)[0].split('_')  # Remove extension and split
-    if len(parts) >= 8:
-        return parts[-2]  # Second to last is the letter
-    return 'A'
+async def send_reviewer_approval_for_folder(channel: str, folder_name: str, task_data: Dict[str, Any], user_name: str, uploaded_files: List[Dict[str, Any]]):
+    """Send folder submission to reviewer for approval"""
+    try:
+        reviewer_info = get_reviewer_info()
+        reviewer_channel = reviewer_info['channel_id']
 
-def get_next_campaign_letter(existing_videos: list, reference_number: str) -> str:
-    """Get the next available campaign letter based on existing videos"""
-    if not existing_videos:
-        return 'A'
-    
-    # Extract all used letters
-    used_letters = set()
-    for video in existing_videos:
-        letter = extract_campaign_letter(video['filename'])
-        if letter and letter.isalpha():
-            used_letters.add(letter)
-    
-    # Find next available letter
-    for i in range(26):  # A-Z
-        letter = chr(65 + i)
-        if letter not in used_letters:
-            return letter
-    
-    return 'AA'  # Fallback if somehow all letters are used
+        if not reviewer_channel:
+            logger.error("Reviewer channel not configured")
+            return
 
-async def handle_video_upload_by_task_number(channel: str, user_id: str, file_info: Dict[str, Any], task_number: int, destination_folder: str):
-    """Handle video upload by task number - rename and version appropriately"""
+        task_number = task_data.get('Task #', task_data.get('task_number', ''))
+        version = await get_latest_version_number(task_number)
+
+        # Create unique workflow ID for this submission
+        workflow_id = f"folder_{task_number}_{int(time.time())}"
+
+        # Save workflow data to database
+        workflow_data = {
+            'task_number': task_number,
+            'folder_name': folder_name,
+            'dropbox_path': f"{DROPBOX_FOLDERS['pending']}/{folder_name}",
+            'videographer_id': user_name,
+            'task_data': task_data,
+            'version_info': {'version': version, 'files': uploaded_files},
+            'reviewer_id': reviewer_info['user_id'],
+            'created_at': datetime.now(UAE_TZ).isoformat(),
+            'status': 'pending'
+        }
+
+        # Build message blocks
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"🎥 *New Submission for Review*\n\n*Task #{task_number} - Version {version}*\n*Submitted by:* {user_name}\n*Folder:* `{folder_name}`"
+                }
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Brand:* {task_data.get('Brand', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Reference:* {task_data.get('Reference Number', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Location:* {task_data.get('Location', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Sales Person:* {task_data.get('Sales Person', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Campaign Start:* {task_data.get('Campaign Start Date', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Campaign End:* {task_data.get('Campaign End Date', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Videographer:* {task_data.get('Videographer', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Filming Date:* {task_data.get('Filming Date', 'N/A')}"},
+                ]
+            }
+        ]
+
+        # Add files information
+        files_text = "*📁 Files in submission:*\n"
+        for file_info in uploaded_files:
+            files_text += f"• {file_info['dropbox_name']}\n"
+
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": files_text
+            }
+        })
+
+        # Add action buttons
+        blocks.append({
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "✅ Accept"},
+                    "style": "primary",
+                    "action_id": "approve_folder_reviewer",
+                    "value": workflow_id
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "❌ Reject"},
+                    "style": "danger",
+                    "action_id": "reject_folder_reviewer",
+                    "value": workflow_id
+                }
+            ]
+        })
+
+        # Send message
+        result = await slack_client.chat_postMessage(
+            channel=reviewer_channel,
+            text=f"🎥 New folder submission for review - Task #{task_number}",
+            blocks=blocks
+        )
+
+        # Save message timestamp for recovery
+        workflow_data['reviewer_msg_ts'] = result['ts']
+        approval_workflows[workflow_id] = workflow_data
+        await save_workflow_async(workflow_id, workflow_data)
+
+    except Exception as e:
+        logger.error(f"Error sending folder to reviewer: {e}")
+
+
+def generate_folder_name(task_data: Dict[str, Any], user_name: str, version: int) -> str:
+    """Generate folder name for task submission"""
+    task_number = task_data.get('Task #', task_data.get('task_number', ''))
+    return f"Task{task_number}_V{version}"
+
+def generate_file_name_in_folder(task_data: Dict[str, Any], user_name: str, version: int, file_index: int, file_extension: str = "mp4") -> str:
+    """Generate individual file name within a submission folder"""
+    task_number = task_data.get('Task #', task_data.get('task_number', ''))
+    return f"Task{task_number}_V{version}_{file_index}.{file_extension}"
+
+async def handle_folder_upload_by_task_number(channel: str, user_id: str, file_infos: List[Dict[str, Any]], task_number: int, destination_folder: str):
+    """Handle multiple file uploads as a single submission folder"""
     try:
         # Check permissions
         has_permission, error_msg = simple_check_permission(user_id, "upload_video")
@@ -552,6 +751,7 @@ async def handle_video_upload_by_task_number(channel: str, user_id: str, file_in
                 text=error_msg
             )
             return False
+
         # Get task data first
         task_data = await get_task_data(task_number)
         if not task_data:
@@ -560,233 +760,122 @@ async def handle_video_upload_by_task_number(channel: str, user_id: str, file_in
                 text=f"❌ Task #{task_number} not found. Please check the task number."
             )
             return False
-        
+
         # Check campaign end date
         campaign_end_date = task_data.get('Campaign End Date')
         if campaign_end_date:
             try:
                 end_date = pd.to_datetime(campaign_end_date).date()
                 today = datetime.now(UAE_TZ).date()
-                
+
                 if end_date < today:
                     await slack_client.chat_postMessage(
                         channel=channel,
-                        text=f"❌ Cannot upload video: Campaign for Task #{task_number} ended on {end_date}. Please check with your supervisor."
+                        text=f"❌ Cannot upload files: Campaign for Task #{task_number} ended on {end_date}. Please check with your supervisor."
                     )
                     return False
             except Exception as e:
                 logger.warning(f"Error parsing campaign end date: {e}")
-        
-        # Get file details
-        file_id = file_info.get("id")
-        original_file_name = file_info.get("name", "video.mp4")
-        
-        # Get full file info from Slack
-        file_response = await slack_client.files_info(file=file_id)
-        if not file_response["ok"]:
-            raise Exception(f"Failed to get file info: {file_response}")
-        
-        file_data = file_response["file"]
-        file_url = file_data.get("url_private_download") or file_data.get("url_private")
-        
+
         # Get user info
         user_info = await slack_client.users_info(user=user_id)
         user_name = user_info["user"]["profile"].get("real_name", "Unknown")
-        
-        # Download file from Slack
-        headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
-        response = requests.get(file_url, headers=headers, stream=True)
-        response.raise_for_status()
-        
-        # Read file content (preserving quality)
-        file_content = response.content
-        
-        # Get reference number for version checking
-        reference_number = str(task_data.get('Reference Number', '')).replace(' ', '')
-        
+
         # Get latest version number (excluding accepted folder)
-        latest_version = await get_latest_version_number(reference_number, exclude_accepted=True)
+        latest_version = await get_latest_version_number(task_number, exclude_accepted=True)
         new_version = latest_version + 1
-        
-        # Generate proper filename
-        file_name = generate_video_filename(task_data, user_name, new_version)
-        
-        # Check for campaign letter (B, C, D...) if needed
-        existing_videos = await check_existing_videos(task_number, reference_number)
-        if existing_videos:
-            # Update letter in filename
-            next_letter = get_next_campaign_letter(existing_videos, reference_number)
-            parts = file_name.rsplit('.', 1)[0].split('_')
-            if len(parts) >= 8:
-                parts[-2] = next_letter  # Update letter
-                file_name = '_'.join(parts) + '.mp4'
-        
-        # Upload to Dropbox with generated filename
-        dropbox_path = await dropbox_manager.upload_video(
-            file_content,
-            file_name,
-            destination_folder
-        )
-        
-        # Update Excel status with version only (no filename stored)
-        await update_excel_status(task_number, destination_folder, version=new_version)
-        
+
+        # Generate folder name
+        folder_name = generate_folder_name(task_data, user_name, new_version)
+
+        # Create folder in Dropbox and upload all files
+        uploaded_files = []
+        for file_index, file_info in enumerate(file_infos, 1):
+            # Get file details
+            file_id = file_info.get("id")
+            original_file_name = file_info.get("name", f"file_{file_index}.mp4")
+            file_extension = original_file_name.split('.')[-1] if '.' in original_file_name else 'mp4'
+
+            # Get full file info from Slack
+            file_response = await slack_client.files_info(file=file_id)
+            if not file_response["ok"]:
+                raise Exception(f"Failed to get file info for file {file_index}: {file_response}")
+
+            file_data = file_response["file"]
+            file_url = file_data.get("url_private_download") or file_data.get("url_private")
+
+            # Download file from Slack
+            headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+            response = requests.get(file_url, headers=headers, stream=True)
+            response.raise_for_status()
+
+            # Read file content
+            file_content = response.content
+
+            # Generate file name within folder
+            file_name_in_folder = generate_file_name_in_folder(task_data, user_name, new_version, file_index, file_extension)
+
+            # Upload to Dropbox under folder structure
+            dropbox_path = await dropbox_manager.upload_file_to_folder(
+                file_content,
+                file_name_in_folder,
+                folder_name,
+                destination_folder
+            )
+
+            uploaded_files.append({
+                'original_name': original_file_name,
+                'dropbox_name': file_name_in_folder,
+                'dropbox_path': dropbox_path
+            })
+
+        # Update database with folder information
+        await update_excel_status_with_folder(task_number, destination_folder, folder_name, version=new_version)
+
         # Send appropriate notifications
+        files_summary = "\n".join([f"• {f['dropbox_name']}" for f in uploaded_files])
+
         if destination_folder == "pending":
             # Notify reviewer for approval
-            await send_reviewer_approval(channel, file_name, dropbox_path, task_data, user_name)
+            await send_reviewer_approval_for_folder(channel, folder_name, task_data, user_name, uploaded_files)
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"✅ Video for Task #{task_number} uploaded successfully as:\n`{file_name}`\n\nVersion: {new_version}\nStatus: Pending Review"
+                text=f"✅ Submission for Task #{task_number} uploaded successfully:\n\n**Folder:** `{folder_name}`\n**Files:**\n{files_summary}\n\n**Version:** {new_version}\n**Status:** Pending Review"
             )
         elif destination_folder == "raw":
-            # Simple confirmation
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"✅ Video for Task #{task_number} uploaded to Raw folder as:\n`{file_name}`\n\nVersion: {new_version}"
+                text=f"✅ Submission for Task #{task_number} uploaded to Raw folder:\n\n**Folder:** `{folder_name}`\n**Files:**\n{files_summary}\n\n**Version:** {new_version}"
             )
-        
+
         return True
-        
+
     except Exception as e:
-        logger.error(f"Error handling video upload by task number: {e}")
+        logger.error(f"Error handling folder upload by task number: {e}")
         await slack_client.chat_postMessage(
             channel=channel,
-            text=f"❌ Error uploading video: {str(e)}"
+            text=f"❌ Error uploading submission: {str(e)}"
         )
         return False
 
+async def handle_video_upload_by_task_number(channel: str, user_id: str, file_info: Dict[str, Any], task_number: int, destination_folder: str):
+    """Handle single file upload by treating it as a folder with one file"""
+    # Convert single file to list and use folder handler
+    return await handle_folder_upload_by_task_number(channel, user_id, [file_info], task_number, destination_folder)
+
 async def handle_video_upload(channel: str, user_id: str, file_info: Dict[str, Any], destination_folder: str):
-    """Handle video upload from Slack to Dropbox (legacy method)"""
-    try:
-        # Check permissions
-        has_permission, error_msg = simple_check_permission(user_id, "upload_video")
-        if not has_permission:
-            await slack_client.chat_postMessage(
-                channel=channel,
-                text=error_msg
-            )
-            return False
-        # Get file details
-        file_id = file_info.get("id")
-        file_name = file_info.get("name", "video.mp4")
-        
-        # Get full file info from Slack
-        file_response = await slack_client.files_info(file=file_id)
-        if not file_response["ok"]:
-            raise Exception(f"Failed to get file info: {file_response}")
-        
-        file_data = file_response["file"]
-        file_url = file_data.get("url_private_download") or file_data.get("url_private")
-        
-        # Get user info
-        user_info = await slack_client.users_info(user=user_id)
-        user_name = user_info["user"]["profile"].get("real_name", "Unknown")
-        
-        # Download file from Slack
-        headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
-        response = requests.get(file_url, headers=headers, stream=True)
-        response.raise_for_status()
-        
-        # Read file content (preserving quality)
-        file_content = response.content
-        
-        # Extract task number from filename first to validate
-        task_number = extract_task_number(file_name)
-        
-        # Get task details
-        task_data = await get_task_data(task_number) if task_number else None
-        
-        if task_data:
-            # Check campaign end date
-            campaign_end_date = task_data.get('Campaign End Date')
-            if campaign_end_date:
-                try:
-                    end_date = pd.to_datetime(campaign_end_date).date()
-                    today = datetime.now(UAE_TZ).date()
-                    
-                    if end_date < today:
-                        await slack_client.chat_postMessage(
-                            channel=channel,
-                            text=f"❌ Cannot upload video: Campaign end date ({end_date}) has already passed. Please check the campaign dates."
-                        )
-                        return False
-                except Exception as e:
-                    logger.warning(f"Error parsing campaign end date: {e}")
-            
-            # Check for duplicate videos
-            reference_number = task_data.get('Reference Number', '').replace(' ', '')
-            if reference_number:
-                # Check for existing videos in both Dropbox and Excel
-                existing_videos = await check_existing_videos(task_number, reference_number)
-                # Check for existing videos in Dropbox
-                all_existing = existing_videos
-                
-                if all_existing:
-                    # Generate appropriate filename with next letter
-                    next_letter = get_next_campaign_letter(all_existing, reference_number)
-                    
-                    # Parse original filename and update with correct letter
-                    base_name = file_name.rsplit('.', 1)[0]  # Remove extension
-                    extension = file_name.rsplit('.', 1)[1] if '.' in file_name else 'mp4'
-                    parts = base_name.split('_')
-                    
-                    # Update the letter in filename (assuming standard format)
-                    if len(parts) >= 8:
-                        parts[-2] = next_letter  # Update letter
-                        updated_file_name = '_'.join(parts) + '.' + extension
-                    else:
-                        # If filename doesn't match expected format, append letter
-                        updated_file_name = f"{base_name}_{next_letter}.{extension}"
-                    
-                    # Notify user about duplicate
-                    await slack_client.chat_postMessage(
-                        channel=channel,
-                        text=f"ℹ️ Found {len(all_existing)} existing video(s) for reference {reference_number}. This will be video '{next_letter}'."
-                    )
-                    
-                    # Update filename for upload
-                    file_name = updated_file_name
-        
-        # Determine version number for legacy flow (use latest + 1 if task_data available)
-        new_version: Optional[int] = None
-        if task_data:
-            reference_number = task_data.get('Reference Number', '').replace(' ', '')
-            try:
-                latest_version = await get_latest_version_number(reference_number, exclude_accepted=True)
-                new_version = latest_version + 1
-            except Exception:
-                pass
-        
-        # Upload to Dropbox with final filename
-        dropbox_path = await dropbox_manager.upload_video(
-            file_content,
-            file_name,
-            destination_folder
-        )
-        
-        # Update Excel status (if task number detected) with version only
-        if task_number:
-            await update_excel_status(task_number, destination_folder, version=new_version)
-        
-        # Send appropriate notifications based on folder
-        if destination_folder == "pending":
-            # Notify reviewer for approval
-            await send_reviewer_approval(channel, file_name, dropbox_path, task_data, user_name)
-        elif destination_folder == "raw":
-            # Simple confirmation
-            await slack_client.chat_postMessage(
-                channel=channel,
-                text=f"✅ Video uploaded to Raw folder successfully: `{file_name}`"
-            )
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error handling video upload: {e}")
+    """Handle legacy video upload - redirect to folder-based system"""
+    # Extract task number from filename if possible
+    file_name = file_info.get("name", "")
+    task_number = extract_task_number(file_name)
+
+    if task_number:
+        # Use folder-based upload
+        return await handle_video_upload_by_task_number(channel, user_id, file_info, task_number, destination_folder)
+    else:
         await slack_client.chat_postMessage(
             channel=channel,
-            text=f"❌ Error uploading video: {str(e)}"
+            text="❌ Cannot determine task number from filename. Please use the format 'TaskX_...' or specify the task number in your message."
         )
         return False
 
@@ -1205,22 +1294,22 @@ async def get_task_data(task_number: int) -> Optional[Dict]:
         logger.error(f"Error getting task data: {e}")
         return None
 
-def generate_video_filename(task_data: Dict, videographer_name: str, version: int = 1) -> str:
-    """Generate simplified video filename from task data"""
+def generate_video_filename(task_data: Dict, videographer_name: str, version: int = 1, file_index: int = 1) -> str:
+    """Generate video filename for files within folders - LEGACY FUNCTION"""
     try:
         task_number = task_data.get('Task #', 'Unknown')
-        # Simple format: Task{number}_{version}.mp4
-        filename = f"Task{task_number}_{version}.mp4"
+        # Format: Task{number}_V{version}_{index}.mp4 (to match folder naming)
+        filename = f"Task{task_number}_V{version}_{file_index}.mp4"
         return filename
     except Exception as e:
         logger.error(f"Error generating filename: {e}")
         # Fallback filename
-        return f"Task_Unknown_{version}.mp4"
+        return f"Task_Unknown_V{version}_{file_index}.mp4"
 
-async def get_latest_version_number(reference_number: str, exclude_accepted: bool = True) -> int:
-    """Get the latest version number for a video across all folders"""
+async def get_latest_version_number(task_number: int, exclude_accepted: bool = True) -> int:
+    """Get the latest version number for a task based on folder names only"""
     latest_version = 0
-    
+
     try:
         # Ensure token is valid before checking
         await dropbox_manager.ensure_valid_token()
@@ -1228,37 +1317,37 @@ async def get_latest_version_number(reference_number: str, exclude_accepted: boo
         if exclude_accepted:
             # Remove accepted folder from search
             folders_to_check = {k: v for k, v in folders_to_check.items() if k != "accepted"}
-        
+
         for folder_name, folder_path in folders_to_check.items():
             try:
-                # List files in folder
+                # List submission folders only
                 result = dropbox_manager.dbx.files_list_folder(folder_path)
-                
-                # Check all files
+
                 while True:
                     for entry in result.entries:
-                        if isinstance(entry, dropbox.files.FileMetadata):
-                            # Check if filename contains the reference number
-                            if reference_number in entry.name:
-                                # Extract version number (last number before extension)
+                        if isinstance(entry, dropbox.files.FolderMetadata):
+                            # Folder-based system: folder name format is TaskX_VY
+                            folder_name_entry = entry.name
+                            if folder_name_entry.startswith(f"Task{task_number}_V"):
                                 try:
-                                    parts = entry.name.rsplit('.', 1)[0].split('_')
-                                    if parts and parts[-1].isdigit():
-                                        version = int(parts[-1])
+                                    # Extract version from folder name (TaskX_VY format)
+                                    parts = folder_name_entry.split('_V')
+                                    if len(parts) == 2 and parts[1].isdigit():
+                                        version = int(parts[1])
                                         latest_version = max(latest_version, version)
                                 except:
                                     continue
-                    
+
                     if not result.has_more:
                         break
                     result = dropbox_manager.dbx.files_list_folder_continue(result.cursor)
-                    
+
             except Exception as e:
                 logger.warning(f"Error checking folder {folder_path}: {e}")
-                
+
     except Exception as e:
         logger.error(f"Error getting latest version: {e}")
-    
+
     return latest_version
 
 async def update_excel_status(task_number: int, folder: str, version: Optional[int] = None, 
@@ -2381,6 +2470,324 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
         
     except Exception as e:
         logger.error(f"Error handling HoS approval: {e}")
+
+async def handle_folder_reviewer_approval(workflow_id: str, user_id: str, response_url: str):
+    """Handle reviewer approval for folder-based submissions"""
+    try:
+        # Check permissions
+        has_permission, error_msg = simple_check_permission(user_id, "approve_video_reviewer")
+        if not has_permission:
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": error_msg
+            })
+            return
+
+        workflow = await get_workflow_with_cache(workflow_id)
+        if not workflow:
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": "❌ Workflow not found or already processed."
+            })
+            return
+
+        task_number = workflow['task_number']
+        folder_name = workflow['folder_name']
+        task_data = workflow['task_data']
+        videographer_id = workflow['videographer_id']
+
+        # Move folder to Submitted to Sales
+        from_path = workflow['dropbox_path']
+        to_path = f"{DROPBOX_FOLDERS['submitted']}/{folder_name}"
+
+        await dropbox_manager.move_folder(from_path, "submitted")
+        workflow['dropbox_path'] = to_path
+
+        # Update workflow status
+        workflow['reviewer_approved'] = True
+        workflow['status'] = 'hos_pending'
+        await save_workflow_async(workflow_id, workflow)
+
+        # Update task status
+        version = workflow['version_info'].get('version', 1)
+        await update_excel_status_with_folder(task_number, "submitted", folder_name, version=version)
+
+        # Send to Head of Sales
+        await send_folder_to_head_of_sales(workflow_id, task_data, folder_name, version, workflow['version_info'].get('files', []))
+
+        # Update the original message
+        await post_response_url(response_url, {
+            "replace_original": True,
+            "text": f"✅ **Folder Approved by Reviewer**\n\nTask #{task_number} - {folder_name}\nStatus: Sent to Head of Sales for final approval"
+        })
+
+        logger.info(f"✅ Folder submission approved by reviewer: Task #{task_number}, Folder: {folder_name}")
+
+    except Exception as e:
+        logger.error(f"Error in folder reviewer approval: {e}")
+        await post_response_url(response_url, {
+            "replace_original": True,
+            "text": f"❌ Error processing approval: {str(e)}"
+        })
+
+async def handle_folder_reviewer_rejection(workflow_id: str, user_id: str, response_url: str, rejection_comments: Optional[str] = None):
+    """Handle reviewer rejection for folder-based submissions"""
+    try:
+        # Check permissions
+        has_permission, error_msg = simple_check_permission(user_id, "approve_video_reviewer")
+        if not has_permission:
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": error_msg
+            })
+            return
+
+        workflow = await get_workflow_with_cache(workflow_id)
+        if not workflow:
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": "❌ Workflow not found or already processed."
+            })
+            return
+
+        task_number = workflow['task_number']
+        folder_name = workflow['folder_name']
+        task_data = workflow['task_data']
+
+        # Classify rejection reason
+        rejection_class = "Other"
+        if rejection_comments:
+            rejection_class = await classify_rejection_reason(rejection_comments)
+
+        # Move folder to Rejected
+        from_path = workflow['dropbox_path']
+        await dropbox_manager.move_folder(from_path, "rejected")
+
+        # Update workflow status and delete
+        workflow['status'] = 'rejected'
+        await save_workflow_async(workflow_id, workflow)
+        await delete_workflow_async(workflow_id)
+
+        # Update task status with rejection info
+        version = workflow['version_info'].get('version', 1)
+        await update_excel_status_with_folder(task_number, "rejected", folder_name, version=version,
+                                            rejection_reason=rejection_comments, rejection_class=rejection_class,
+                                            rejected_by="Reviewer")
+
+        # Update the original message
+        await post_response_url(response_url, {
+            "replace_original": True,
+            "text": f"❌ **Folder Rejected by Reviewer**\n\nTask #{task_number} - {folder_name}\nReason: {rejection_class}\nComments: {rejection_comments or 'None'}\n\nStatus: Moved to Rejected folder"
+        })
+
+        logger.info(f"❌ Folder submission rejected by reviewer: Task #{task_number}, Folder: {folder_name}, Reason: {rejection_class}")
+
+    except Exception as e:
+        logger.error(f"Error in folder reviewer rejection: {e}")
+        await post_response_url(response_url, {
+            "replace_original": True,
+            "text": f"❌ Error processing rejection: {str(e)}"
+        })
+
+async def send_folder_to_head_of_sales(workflow_id: str, task_data: Dict[str, Any], folder_name: str, version: int, files: List[Dict[str, Any]]):
+    """Send folder submission to Head of Sales for final approval"""
+    try:
+        hos_info = get_head_of_sales_info()
+        hos_channel = hos_info['channel_id']
+
+        if not hos_channel:
+            logger.error("Head of Sales channel not configured")
+            return
+
+        task_number = task_data.get('Task #', task_data.get('task_number', ''))
+
+        # Build message blocks
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"🎥 *Final Approval Required*\n\n*Task #{task_number} - Version {version}*\n*Folder:* `{folder_name}`\n*Approved by Reviewer* ✅"
+                }
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Brand:* {task_data.get('Brand', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Reference:* {task_data.get('Reference Number', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Location:* {task_data.get('Location', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Sales Person:* {task_data.get('Sales Person', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Campaign Start:* {task_data.get('Campaign Start Date', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Campaign End:* {task_data.get('Campaign End Date', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Videographer:* {task_data.get('Videographer', 'N/A')}"},
+                    {"type": "mrkdwn", "text": f"*Filming Date:* {task_data.get('Filming Date', 'N/A')}"},
+                ]
+            }
+        ]
+
+        # Add files information
+        if files:
+            files_text = "*📁 Files in submission:*\n"
+            for file_info in files:
+                files_text += f"• {file_info['dropbox_name']}\n"
+
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": files_text
+                }
+            })
+
+        # Add action buttons
+        blocks.append({
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "✅ Accept"},
+                    "style": "primary",
+                    "action_id": "approve_folder_hos",
+                    "value": workflow_id
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "↩️ Return for Revision"},
+                    "style": "danger",
+                    "action_id": "reject_folder_hos",
+                    "value": workflow_id
+                }
+            ]
+        })
+
+        # Send message
+        result = await slack_client.chat_postMessage(
+            channel=hos_channel,
+            text=f"🎥 Final approval needed for Task #{task_number}",
+            blocks=blocks
+        )
+
+        logger.info(f"✅ Folder sent to Head of Sales: Task #{task_number}, Folder: {folder_name}")
+
+    except Exception as e:
+        logger.error(f"Error sending folder to Head of Sales: {e}")
+
+async def handle_folder_hos_approval(workflow_id: str, user_id: str, response_url: str):
+    """Handle Head of Sales approval for folder-based submissions - final acceptance"""
+    try:
+        # Check permissions
+        has_permission, error_msg = simple_check_permission(user_id, "approve_video_hos")
+        if not has_permission:
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": error_msg
+            })
+            return
+
+        workflow = await get_workflow_with_cache(workflow_id)
+        if not workflow:
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": "❌ Workflow not found or already processed."
+            })
+            return
+
+        task_number = workflow['task_number']
+        folder_name = workflow['folder_name']
+        task_data = workflow['task_data']
+
+        # Move folder to Accepted
+        from_path = workflow['dropbox_path']
+        await dropbox_manager.move_folder(from_path, "accepted")
+
+        # Update workflow status and clean up
+        workflow['hos_approved'] = True
+        workflow['status'] = 'completed'
+        await save_workflow_async(workflow_id, workflow)
+        await delete_workflow_async(workflow_id)
+
+        # Update task status
+        version = workflow['version_info'].get('version', 1)
+        await update_excel_status_with_folder(task_number, "accepted", folder_name, version=version)
+
+        # Archive the task
+        from db_utils import archive_task
+        await asyncio.to_thread(archive_task, task_number)
+
+        # Update Trello if applicable
+        await update_trello_status(task_number, "accepted")
+
+        # Update the original message
+        await post_response_url(response_url, {
+            "replace_original": True,
+            "text": f"✅ **Folder Approved - FINAL**\n\nTask #{task_number} - {folder_name}\nStatus: Accepted and Archived\n\n🎉 Workflow Complete!"
+        })
+
+        logger.info(f"✅ Folder submission FINAL approval: Task #{task_number}, Folder: {folder_name}")
+
+    except Exception as e:
+        logger.error(f"Error in folder HoS approval: {e}")
+        await post_response_url(response_url, {
+            "replace_original": True,
+            "text": f"❌ Error processing final approval: {str(e)}"
+        })
+
+async def handle_folder_hos_rejection(workflow_id: str, user_id: str, response_url: str, rejection_comments: Optional[str] = None):
+    """Handle Head of Sales rejection for folder-based submissions - return for revision"""
+    try:
+        # Check permissions
+        has_permission, error_msg = simple_check_permission(user_id, "approve_video_hos")
+        if not has_permission:
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": error_msg
+            })
+            return
+
+        workflow = await get_workflow_with_cache(workflow_id)
+        if not workflow:
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": "❌ Workflow not found or already processed."
+            })
+            return
+
+        task_number = workflow['task_number']
+        folder_name = workflow['folder_name']
+        task_data = workflow['task_data']
+
+        # Move folder to Returned
+        from_path = workflow['dropbox_path']
+        await dropbox_manager.move_folder(from_path, "returned")
+
+        # Update workflow status and clean up
+        workflow['status'] = 'returned'
+        await save_workflow_async(workflow_id, workflow)
+        await delete_workflow_async(workflow_id)
+
+        # Update task status with return info
+        version = workflow['version_info'].get('version', 1)
+        await update_excel_status_with_folder(task_number, "returned", folder_name, version=version,
+                                            rejection_reason=rejection_comments, rejection_class="Head of Sales Return",
+                                            rejected_by="Head of Sales")
+
+        # Update Trello if applicable
+        await update_trello_status(task_number, "returned")
+
+        # Update the original message
+        await post_response_url(response_url, {
+            "replace_original": True,
+            "text": f"↩️ **Folder Returned for Revision**\n\nTask #{task_number} - {folder_name}\nComments: {rejection_comments or 'None'}\n\nStatus: Moved to Returned folder"
+        })
+
+        logger.info(f"↩️ Folder submission returned by HoS: Task #{task_number}, Folder: {folder_name}")
+
+    except Exception as e:
+        logger.error(f"Error in folder HoS rejection: {e}")
+        await post_response_url(response_url, {
+            "replace_original": True,
+            "text": f"❌ Error processing return: {str(e)}"
+        })
 
 async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str, rejection_comments: Optional[str] = None):
     """Handle Head of Sales rejection - move back to returned"""

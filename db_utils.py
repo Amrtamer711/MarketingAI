@@ -41,7 +41,8 @@ def init_db() -> None:
                     "Status" TEXT,
                     "Filming Date" TEXT,
                     "Videographer" TEXT,
-                    "Video Filename" TEXT,
+                    "Task Type" TEXT DEFAULT 'videography',
+                    "Submission Folder" TEXT,
                     "Current Version" TEXT,
                     "Version History" TEXT,
                     "Pending Timestamps" TEXT,
@@ -65,6 +66,8 @@ def init_db() -> None:
                     status TEXT,
                     filming_date TEXT,
                     videographer TEXT,
+                    task_type TEXT DEFAULT 'videography',
+                    submission_folder TEXT,
                     current_version TEXT,
                     version_history TEXT,
                     pending_timestamps TEXT,
@@ -80,7 +83,7 @@ def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS approval_workflows (
                     workflow_id TEXT PRIMARY KEY,
                     task_number INTEGER,
-                    filename TEXT,
+                    folder_name TEXT,
                     dropbox_path TEXT,
                     videographer_id TEXT,
                     task_data TEXT,
@@ -136,7 +139,7 @@ def tasks_to_dataframe(rows: List[Dict[str, Any]]) -> pd.DataFrame:
         return pd.DataFrame(columns=[
             "Task #", "Timestamp", "Brand", "Campaign Start Date", "Campaign End Date",
             "Reference Number", "Location", "Sales Person", "Submitted By", "Status",
-            "Filming Date", "Videographer", "Video Filename", "Current Version",
+            "Filming Date", "Videographer", "Task Type", "Submission Folder", "Current Version",
             "Version History", "Pending Timestamps", "Submitted Timestamps",
             "Returned Timestamps", "Rejected Timestamps", "Accepted Timestamps"
         ])
@@ -170,7 +173,7 @@ def insert_task(row: Dict[str, Any]) -> int:
             cols = [
                 'Timestamp', 'Brand', 'Campaign Start Date', 'Campaign End Date',
                 'Reference Number', 'Location', 'Sales Person', 'Submitted By', 'Status',
-                'Filming Date', 'Videographer', 'Video Filename', 'Current Version', 'Version History',
+                'Filming Date', 'Videographer', 'Task Type', 'Submission Folder', 'Current Version', 'Version History',
                 'Pending Timestamps', 'Submitted Timestamps', 'Returned Timestamps', 'Rejected Timestamps', 'Accepted Timestamps'
             ]
             vals = [row.get(c, '') for c in cols]
@@ -290,12 +293,12 @@ def archive_task(task_number: int) -> bool:
                     return False
                 conn.execute("""
                     INSERT INTO completed_tasks
-                    (task_number, brand, campaign_start_date, campaign_end_date, reference_number, location, sales_person, submitted_by, status, filming_date, videographer, current_version, version_history, pending_timestamps, submitted_timestamps, returned_timestamps, rejected_timestamps, accepted_timestamps, completed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (task_number, brand, campaign_start_date, campaign_end_date, reference_number, location, sales_person, submitted_by, status, filming_date, videographer, task_type, submission_folder, current_version, version_history, pending_timestamps, submitted_timestamps, returned_timestamps, rejected_timestamps, accepted_timestamps, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     row["task_number"], row["Brand"], row["Campaign Start Date"], row["Campaign End Date"], row["Reference Number"],
                     row["Location"], row["Sales Person"], row["Submitted By"], row["Status"], row["Filming Date"],
-                    row["Videographer"], row["Current Version"], row["Version History"], row["Pending Timestamps"],
+                    row["Videographer"], row.get("Task Type", "videography"), row.get("Submission Folder", ""), row["Current Version"], row["Version History"], row["Pending Timestamps"],
                     row["Submitted Timestamps"], row["Returned Timestamps"], row["Rejected Timestamps"], row["Accepted Timestamps"],
                     datetime.now(UAE_TZ).strftime('%d-%m-%Y %H:%M:%S')
                 ))
@@ -406,7 +409,8 @@ async def save_task(data: Dict[str, Any]) -> Dict[str, Any]:
             'Status': "Not assigned yet",
             'Filming Date': filming_date,
             'Videographer': "",
-            'Video Filename': "",
+            'Task Type': data.get("task_type", "videography"),
+            'Submission Folder': "",
             'Current Version': "",
             'Version History': "[]",
             'Pending Timestamps': "",
@@ -562,17 +566,17 @@ def save_workflow(workflow_id: str, workflow_data: Dict[str, Any]) -> bool:
             # Serialize complex data as JSON
             task_data_json = json.dumps(workflow_data.get('task_data', {}))
             version_info_json = json.dumps(workflow_data.get('version_info', {}))
-            
+
             conn.execute("""
-                INSERT OR REPLACE INTO approval_workflows 
-                (workflow_id, task_number, filename, dropbox_path, videographer_id, 
-                 task_data, version_info, reviewer_id, reviewer_msg_ts, hos_id, 
+                INSERT OR REPLACE INTO approval_workflows
+                (workflow_id, task_number, folder_name, dropbox_path, videographer_id,
+                 task_data, version_info, reviewer_id, reviewer_msg_ts, hos_id,
                  hos_msg_ts, reviewer_approved, hos_approved, created_at, updated_at, status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 workflow_id,
                 workflow_data.get('task_number'),
-                workflow_data.get('filename'),
+                workflow_data.get('folder_name'),
                 workflow_data.get('dropbox_path'),
                 workflow_data.get('videographer_id'),
                 task_data_json,

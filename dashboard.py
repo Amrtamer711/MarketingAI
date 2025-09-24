@@ -22,9 +22,9 @@ async def get_historical_tasks_df() -> pd.DataFrame:
         with sqlite3.connect(HISTORY_DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                """SELECT task_number, brand, campaign_start_date, campaign_end_date, 
-                   reference_number, location, sales_person, submitted_by, status, 
-                   filming_date, videographer, current_version, version_history,
+                """SELECT task_number, brand, campaign_start_date, campaign_end_date,
+                   reference_number, location, sales_person, submitted_by, status,
+                   filming_date, videographer, task_type, submission_folder, current_version, version_history,
                    pending_timestamps, submitted_timestamps, returned_timestamps,
                    rejected_timestamps, accepted_timestamps, completed_at
                 FROM completed_tasks
@@ -49,7 +49,8 @@ async def get_historical_tasks_df() -> pd.DataFrame:
                         'Status': task_data['status'] or 'Done',
                         'Filming Date': task_data['filming_date'] or '',
                         'Videographer': task_data['videographer'] or '',
-                        'Video Filename': '',  # Not stored in history
+                        'Task Type': task_data.get('task_type', 'videography') or 'videography',
+                        'Submission Folder': task_data.get('submission_folder', '') or '',
                         'Current Version': task_data['current_version'] or '',
                         'Version History': task_data['version_history'] or '[]',
                         'Timestamp': task_data['completed_at'] or '',
@@ -66,7 +67,7 @@ async def get_historical_tasks_df() -> pd.DataFrame:
                 return pd.DataFrame(columns=[
                     'Task #', 'Brand', 'Campaign Start Date', 'Campaign End Date',
                     'Reference Number', 'Location', 'Sales Person', 'Submitted By',
-                    'Status', 'Filming Date', 'Videographer', 'Video Filename', 
+                    'Status', 'Filming Date', 'Videographer', 'Task Type', 'Submission Folder',
                     'Current Version', 'Version History', 'Timestamp',
                     'Pending Timestamps', 'Submitted Timestamps', 'Returned Timestamps',
                     'Rejected Timestamps', 'Accepted Timestamps'
