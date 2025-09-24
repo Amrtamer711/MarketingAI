@@ -2824,7 +2824,7 @@ async def handle_folder_hos_approval(workflow_id: str, user_id: str, response_ur
         # Update the original message
         await post_response_url(response_url, {
             "replace_original": True,
-            "text": f"✅ **Folder Approved - FINAL**\n\nTask #{task_number} - {folder_name}\nStatus: Accepted and Archived\n\n🎉 Workflow Complete!"
+            "text": f"🎉 **Final Approval Complete!**\n\n✅ **Task #{task_number}** - {folder_name} (v{version})\n📁 **Status:** Accepted & Ready for Use\n🗃️ **Archive:** Task moved to history\n\n🎊 **Workflow Successfully Completed!**\n_All stakeholders have been notified and the folder is now available for the sales team._"
         })
 
         logger.info(f"✅ Folder submission FINAL approval: Task #{task_number}, Folder: {folder_name}")
@@ -3029,8 +3029,8 @@ async def cleanup_other_folder_versions(task_number: int, accepted_version: int)
                         if isinstance(entry, dropbox.files.FolderMetadata):
                             # Check if this is a folder for the same task
                             if entry.name.startswith(base_foldername):
-                                # Extract version from foldername (Task123_V2_20240924_142030)
-                                version_match = re.search(r'_V(\d+)_', entry.name)
+                                # Extract version from foldername (Task1_V2)
+                                version_match = re.search(r'_V(\d+)$', entry.name)
                                 if version_match:
                                     folder_version = int(version_match.group(1))
                                     # Don't reject the accepted version
@@ -3088,7 +3088,7 @@ async def cleanup_other_folder_versions(task_number: int, accepted_version: int)
                 if (workflow.get('task_number') == task_number and
                     workflow.get('workflow_id') not in [w[0] for w in workflows_to_cancel]):
                     # Extract version from workflow folder_name
-                    version_match = re.search(r'_V(\d+)_', workflow.get('folder_name', ''))
+                    version_match = re.search(r'_V(\d+)$', workflow.get('folder_name', ''))
                     if version_match:
                         folder_version = int(version_match.group(1))
                         if folder_version != accepted_version:
@@ -3188,6 +3188,207 @@ async def cleanup_other_folder_versions(task_number: int, accepted_version: int)
 
     except Exception as e:
         logger.error(f"Error in cleanup_other_folder_versions: {e}")
+
+async def handle_permanent_folder_rejection(task_number: int, task_data: Dict[str, Any]):
+    """Handle permanent rejection of a task - reject all folder versions and cancel workflows"""
+    try:
+        logger.info(f"Processing permanent folder rejection for Task #{task_number}")
+
+        # Get videographer info
+        videographer_name = task_data.get('Videographer', '')
+        videographer_id = None
+
+        # Load config to get videographer Slack ID
+        from management import load_videographer_config
+        config = load_videographer_config()
+        videographers = config.get('videographers', {})
+
+        if videographer_name and videographer_name in videographers:
+            videographer_info = videographers[videographer_name]
+            videographer_id = videographer_info.get('slack_user_id') if isinstance(videographer_info, dict) else None
+
+        # Search for all folders of this task
+        base_foldername = f"Task{task_number}_"
+        folders_rejected = []
+        workflows_to_cancel = []
+
+        # Search ALL folders for this task's folders (not just active pipeline)
+        all_folders = ["raw", "pending", "submitted", "returned", "rejected"]
+
+        for folder_location in all_folders:
+            folder_path = DROPBOX_FOLDERS.get(folder_location)
+            if not folder_path:
+                continue
+
+            try:
+                # List folders in location
+                result = dropbox_manager.dbx.files_list_folder(folder_path)
+
+                while True:
+                    for entry in result.entries:
+                        if isinstance(entry, dropbox.files.FolderMetadata):
+                            # Check if this is a folder for the task
+                            if entry.name.startswith(base_foldername):
+                                # If not already in rejected folder, move it
+                                if folder_location != "rejected":
+                                    try:
+                                        # Move to rejected folder
+                                        to_path = f"{DROPBOX_FOLDERS['rejected']}/{entry.name}"
+
+                                        # Check if folder already exists in rejected location
+                                        try:
+                                            dropbox_manager.dbx.files_get_metadata(to_path)
+                                            # Folder exists, need to rename
+                                            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                            to_path = f"{DROPBOX_FOLDERS['rejected']}/{entry.name}_perm_{timestamp}"
+                                        except:
+                                            # Folder doesn't exist, proceed normally
+                                            pass
+
+                                        dropbox_manager.dbx.files_move_v2(entry.path_display, to_path)
+
+                                        folders_rejected.append({
+                                            'foldername': entry.name,
+                                            'from_folder': folder_location,
+                                            'to_path': to_path
+                                        })
+
+                                        logger.info(f"Moved folder {entry.name} from {folder_location} to rejected (permanent)")
+
+                                    except Exception as e:
+                                        logger.error(f"Error moving folder {entry.name} to rejected: {e}")
+                                else:
+                                    # Already in rejected, just record it
+                                    folders_rejected.append({
+                                        'foldername': entry.name,
+                                        'from_folder': folder_location,
+                                        'to_path': entry.path_display
+                                    })
+
+                    # Check if there are more entries
+                    if not result.has_more:
+                        break
+                    result = dropbox_manager.dbx.files_list_folder_continue(result.cursor)
+
+            except Exception as e:
+                logger.error(f"Error searching folder location {folder_location}: {e}")
+
+        logger.info(f"Found and processed {len(folders_rejected)} folders for permanent rejection of Task #{task_number}")
+
+        # Find all workflows for this task to cancel
+        for workflow_id, workflow in list(approval_workflows.items()):
+            if workflow.get('task_number') == task_number:
+                workflows_to_cancel.append((workflow_id, workflow))
+
+        # Also check database for workflows not in memory
+        try:
+            all_pending_workflows = await get_all_pending_workflows_async()
+            for workflow in all_pending_workflows:
+                if (workflow.get('task_number') == task_number and
+                    workflow.get('workflow_id') not in [w[0] for w in workflows_to_cancel]):
+                    workflows_to_cancel.append((workflow['workflow_id'], workflow))
+        except Exception as e:
+            logger.error(f"Error checking database for folder workflows: {e}")
+
+        # Cancel active workflows and update messages
+        for workflow_id, workflow in workflows_to_cancel:
+            try:
+                logger.info(f"Canceling folder workflow {workflow_id} for permanent rejection")
+
+                # Update reviewer messages if available
+                if workflow.get('reviewer_msg_ts') and workflow.get('reviewer_msg_channel'):
+                    try:
+                        await slack_client.chat_update(
+                            channel=workflow['reviewer_msg_channel'],
+                            ts=workflow['reviewer_msg_ts'],
+                            text="⛔ This task has been permanently rejected",
+                            blocks=[{
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"⛔ *Task Permanently Rejected*\n\nTask #{task_number} has been permanently rejected and archived."
+                                }
+                            }]
+                        )
+                    except Exception as e:
+                        if "message_not_found" not in str(e):
+                            logger.warning(f"Could not update reviewer message: {e}")
+
+                # Update HOS messages if available
+                if workflow.get('hos_msg_ts') and workflow.get('hos_msg_channel'):
+                    try:
+                        await slack_client.chat_update(
+                            channel=workflow['hos_msg_channel'],
+                            ts=workflow['hos_msg_ts'],
+                            text="⛔ This task has been permanently rejected",
+                            blocks=[{
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"⛔ *Task Permanently Rejected*\n\nTask #{task_number} has been permanently rejected and archived."
+                                }
+                            }]
+                        )
+                    except Exception as e:
+                        if "message_not_found" not in str(e):
+                            logger.warning(f"Could not update HoS message: {e}")
+
+                # Remove workflow from cache and database
+                if workflow_id in approval_workflows:
+                    del approval_workflows[workflow_id]
+                await delete_workflow_async(workflow_id)
+
+            except Exception as e:
+                logger.error(f"Error updating messages for workflow {workflow_id}: {e}")
+
+        # Notify videographer about permanent rejection
+        if videographer_id and folders_rejected:
+            try:
+                folder_list = "\n".join([f"• `{f['foldername']}` (from {f['from_folder']})" for f in folders_rejected])
+
+                await slack_client.chat_postMessage(
+                    channel=videographer_id,
+                    text=f"⛔ Task #{task_number} has been permanently rejected",
+                    blocks=[{
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"⛔ *Task Permanently Rejected*\n\nTask #{task_number} has been permanently rejected and archived.\n\n" +
+                                   f"Brand: {task_data.get('Brand', 'N/A')}\n" +
+                                   f"Reference: {task_data.get('Reference Number', 'N/A')}\n\n" +
+                                   f"The following folders have been moved to the rejected folder:\n{folder_list}\n\n" +
+                                   "*This task will not count towards reviewer response time metrics.*"
+                        }
+                    }]
+                )
+            except Exception as e:
+                logger.error(f"Error notifying videographer about permanent folder rejection: {e}")
+
+        # Archive any Trello card
+        try:
+            from trello_utils import get_trello_card_by_task_number, archive_trello_card
+            logger.info(f"Looking for Trello card for permanently rejected Task #{task_number}")
+
+            # Use asyncio.to_thread for the synchronous Trello API call
+            card = await asyncio.to_thread(get_trello_card_by_task_number, task_number)
+
+            if card:
+                logger.info(f"Found Trello card '{card['name']}' (ID: {card['id']})")
+                success = await asyncio.to_thread(archive_trello_card, card['id'])
+                if success:
+                    logger.info(f"✅ Archived Trello card for permanently rejected Task #{task_number}")
+                else:
+                    logger.error(f"Failed to archive Trello card for permanently rejected Task #{task_number}")
+            else:
+                logger.warning(f"No Trello card found for permanently rejected Task #{task_number}")
+        except Exception as e:
+            logger.warning(f"Error archiving Trello card: {e}")
+
+        logger.info(f"Permanent folder rejection completed for Task #{task_number}")
+
+    except Exception as e:
+        logger.error(f"Error in handle_permanent_folder_rejection: {e}")
+        raise
 
 async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str, rejection_comments: Optional[str] = None):
     """Handle Head of Sales rejection - move back to returned"""
