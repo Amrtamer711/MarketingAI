@@ -818,7 +818,7 @@ Videographer: {updated_data.get('Videographer', '')}"""
                 if 'filming_date' in trello_updates:
                     await update_checklist_dates(trello_card['id'], trello_updates['filming_date'])
                 if trello_payload:
-                    success = await update_trello_card(trello_card['id'], trello_payload)
+                    success = update_trello_card(trello_card['id'], trello_payload)
                     if not success:
                         return {"success": True, "warning": "DB updated but Trello update failed"}
             else:

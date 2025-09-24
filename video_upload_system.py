@@ -1345,6 +1345,50 @@ async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any
             )
             return
 
+        # Check if task is assigned (has a videographer)
+        assigned_videographer = task_data.get('Videographer', '').strip()
+        if not assigned_videographer:
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text=f"❌ Task #{task_number} is not assigned to any videographer yet."
+            )
+            return
+
+        # Check if task is completed
+        status = str(task_data.get('Status', '')).strip()
+        if status == 'Done':
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text=f"❌ Task #{task_number} is already completed (Status: {status}). No uploads allowed for completed tasks."
+            )
+            return
+
+        # Verify videographer assignment
+        from management import load_videographer_config
+        config = load_videographer_config()
+        videographers = config.get('videographers', {})
+
+        # Find who is uploading
+        uploader_name = None
+        for name, info in videographers.items():
+            if isinstance(info, dict) and info.get('slack_user_id') == user_id:
+                uploader_name = name
+                break
+
+        if not uploader_name:
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text=f"❌ You are not registered as a videographer. Please contact admin."
+            )
+            return
+
+        if uploader_name != assigned_videographer:
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text=f"❌ Task #{task_number} is assigned to {assigned_videographer}, not you ({uploader_name})."
+            )
+            return
+
         # Get task number for folder naming
         task_number = task_data.get('Task #', 0)
 
