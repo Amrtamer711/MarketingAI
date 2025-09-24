@@ -1600,11 +1600,19 @@ async def send_folder_to_reviewer(task_number: int, folder_name: str, folder_pat
                     },
                     {
                         "type": "mrkdwn",
-                        "text": f"*Reference:* {task_data.get('Reference', 'N/A')}"
+                        "text": f"*Reference:* {task_data.get('Reference Number', task_data.get('Reference', 'N/A'))}"
                     },
                     {
                         "type": "mrkdwn",
-                        "text": f"*Date:* {task_data.get('Date', 'N/A')}"
+                        "text": f"*Campaign:* {task_data.get('Campaign Start Date', 'N/A')} to {task_data.get('Campaign End Date', 'N/A')}"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Sales Person:* {task_data.get('Sales Person', 'N/A')}"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Task Type:* {task_data.get('Task Type', 'videography')}"
                     }
                 ]
             },
@@ -1724,12 +1732,12 @@ async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url:
                         "fields": [
                             {"type": "mrkdwn", "text": f"*Brand:* {task_data.get('Brand', 'N/A')}"},
                             {"type": "mrkdwn", "text": f"*Location:* {task_data.get('Location', 'N/A')}"},
-                            {"type": "mrkdwn", "text": f"*Reference:* {task_data.get('Reference Number', 'N/A')}"},
+                            {"type": "mrkdwn", "text": f"*Reference:* {task_data.get('Reference Number', task_data.get('Reference', 'N/A'))}"},
                             {"type": "mrkdwn", "text": f"*Sales Person:* {task_data.get('Sales Person', 'N/A')}"},
-                            {"type": "mrkdwn", "text": f"*Campaign Start:* {task_data.get('Campaign Start Date', 'N/A')}"},
-                            {"type": "mrkdwn", "text": f"*Campaign End:* {task_data.get('Campaign End Date', 'N/A')}"},
+                            {"type": "mrkdwn", "text": f"*Campaign:* {task_data.get('Campaign Start Date', 'N/A')} to {task_data.get('Campaign End Date', 'N/A')}"},
                             {"type": "mrkdwn", "text": f"*Videographer:* {task_data.get('Videographer', 'N/A')}"},
                             {"type": "mrkdwn", "text": f"*Filming Date:* {task_data.get('Filming Date', 'N/A')}"},
+                            {"type": "mrkdwn", "text": f"*Task Type:* {task_data.get('Task Type', 'videography')}"},
                         ]
                     },
                     {
