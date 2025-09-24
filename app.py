@@ -627,6 +627,20 @@ async def slack_interactive(request: Request):
                                     "element": {
                                         "type": "plain_text_input",
                                         "action_id": "reason_input",
+                                        "multiline": True,
+                                        "placeholder": {"type": "plain_text", "text": "Enter the reason for rejection..."}
+                                    }
+                                }
+                            ],
+                            "submit": {"type": "plain_text", "text": "Submit"},
+                            "close": {"type": "plain_text", "text": "Cancel"},
+                            "private_metadata": json.dumps({
+                                "workflow_id": workflow_id,
+                                "response_url": response_url,
+                                "stage": "hos"
+                            })
+                        }
+                    )
 
                 # Folder-based workflow handlers
                 elif action_id == "approve_folder_reviewer":
