@@ -824,15 +824,45 @@ async def slack_interactive(request: Request):
 
         elif callback_id.startswith("reject_folder_hos_modal_"):
             # Handle folder HOS rejection modal submission
-            workflow_id = callback_id.split("_")[-1]
+            metadata = json.loads(payload["view"]["private_metadata"])
+            workflow_id = metadata["workflow_id"]
+            response_url = metadata["response_url"]
 
             # Get rejection reason from modal
             rejection_reason = payload["view"]["state"]["values"]["rejection_reason"]["reason_input"]["value"]
 
             from video_upload_system import handle_folder_hos_rejection
 
+            # Send immediate "Please wait" response
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": "⏳ Please wait... Processing return for revision..."
+            })
+
             # Process folder HOS rejection
-            asyncio.create_task(handle_folder_hos_rejection(workflow_id, user_id, rejection_reason))
+            asyncio.create_task(handle_folder_hos_rejection(workflow_id, user_id, response_url, rejection_reason))
+
+            return JSONResponse({"response_action": "clear"})
+
+        elif callback_id.startswith("reject_folder_reviewer_modal_"):
+            # Handle folder reviewer rejection modal submission
+            metadata = json.loads(payload["view"]["private_metadata"])
+            workflow_id = metadata["workflow_id"]
+            response_url = metadata["response_url"]
+
+            # Get rejection reason from modal
+            rejection_reason = payload["view"]["state"]["values"]["rejection_reason"]["reason_input"]["value"]
+
+            from video_upload_system import handle_folder_reviewer_rejection
+
+            # Send immediate "Please wait" response
+            await post_response_url(response_url, {
+                "replace_original": True,
+                "text": "⏳ Please wait... Processing rejection..."
+            })
+
+            # Process folder reviewer rejection
+            asyncio.create_task(handle_folder_reviewer_rejection(workflow_id, user_id, response_url, rejection_reason))
 
             return JSONResponse({"response_action": "clear"})
 
