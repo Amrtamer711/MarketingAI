@@ -2715,6 +2715,11 @@ async def handle_folder_hos_rejection(workflow_id: str, user_id: str, response_u
         folder_name = workflow['folder_name']
         task_data = workflow['task_data']
 
+        # Classify rejection reason
+        rejection_class = "Other"
+        if rejection_comments:
+            rejection_class = await classify_rejection_reason(rejection_comments)
+
         # Move folder to Returned
         from_path = workflow['dropbox_path']
         try:
@@ -2733,11 +2738,8 @@ async def handle_folder_hos_rejection(workflow_id: str, user_id: str, response_u
         # Update task status with return info
         version = workflow['version_info'].get('version', 1)
         await update_excel_status_with_folder(task_number, "returned", folder_name, version=version,
-                                            rejection_reason=rejection_comments, rejection_class="Head of Sales Return",
+                                            rejection_reason=rejection_comments, rejection_class=rejection_class,
                                             rejected_by="Head of Sales")
-
-        # Update Trello if applicable
-        await update_trello_status(task_number, "returned")
 
         # Update the original message
         await post_response_url(response_url, {

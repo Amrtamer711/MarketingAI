@@ -662,6 +662,57 @@ async def slack_interactive(request: Request):
                             })
                         }
                     )
+
+                elif action_id == "approve_folder_hos":
+                    await post_response_url(response_url, {
+                        "replace_original": True,
+                        "text": "⏳ Please wait... Processing final approval..."
+                    })
+                    asyncio.create_task(
+                        handle_folder_hos_approval(workflow_id, user_id, response_url)
+                    )
+
+                elif action_id == "reject_folder_hos":
+                    from video_upload_system import get_workflow_with_cache
+                    workflow = await get_workflow_with_cache(workflow_id) or {}
+                    task_number = workflow.get('task_number', 'Unknown')
+
+                    await slack_client.views_open(
+                        trigger_id=payload["trigger_id"],
+                        view={
+                            "type": "modal",
+                            "callback_id": f"reject_folder_hos_modal_{workflow_id}",
+                            "title": {"type": "plain_text", "text": "Return for Revision"},
+                            "blocks": [
+                                {
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": f"Please provide a reason for returning the submission for Task #{task_number} for revision"
+                                    }
+                                },
+                                {
+                                    "type": "input",
+                                    "block_id": "rejection_reason",
+                                    "label": {"type": "plain_text", "text": "Return Reason"},
+                                    "element": {
+                                        "type": "plain_text_input",
+                                        "action_id": "reason_input",
+                                        "multiline": True,
+                                        "placeholder": {"type": "plain_text", "text": "Enter the reason for returning for revision..."}
+                                    }
+                                }
+                            ],
+                            "submit": {"type": "plain_text", "text": "Submit"},
+                            "close": {"type": "plain_text", "text": "Cancel"},
+                            "private_metadata": json.dumps({
+                                "workflow_id": workflow_id,
+                                "response_url": response_url,
+                                "stage": "hos"
+                            })
+                        }
+                    )
+
                 # Handle the new workflow-based actions from send_reviewer_approval and send_sales_approval
                 elif action_id == "approve_video_workflow":
                     # Similar to approve_video_reviewer
@@ -770,7 +821,21 @@ async def slack_interactive(request: Request):
                 asyncio.create_task(handle_hos_rejection(workflow_id, user_id, response_url, rejection_reason))
             
             return JSONResponse({"response_action": "clear"})
-    
+
+        elif callback_id.startswith("reject_folder_hos_modal_"):
+            # Handle folder HOS rejection modal submission
+            workflow_id = callback_id.split("_")[-1]
+
+            # Get rejection reason from modal
+            rejection_reason = payload["view"]["state"]["values"]["rejection_reason"]["reason_input"]["value"]
+
+            from video_upload_system import handle_folder_hos_rejection
+
+            # Process folder HOS rejection
+            asyncio.create_task(handle_folder_hos_rejection(workflow_id, user_id, rejection_reason))
+
+            return JSONResponse({"response_action": "clear"})
+
     return JSONResponse({"ok": True})
 
 # ========== FASTAPI ENDPOINTS ==========
