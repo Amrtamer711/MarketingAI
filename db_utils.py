@@ -816,7 +816,7 @@ Videographer: {updated_data.get('Videographer', '')}"""
                     if new_list_id:
                         trello_payload['idList'] = new_list_id
                 if 'filming_date' in trello_updates:
-                    await update_checklist_dates(trello_card['id'], trello_updates['filming_date'])
+                    update_checklist_dates(trello_card['id'], trello_updates['filming_date'])
                 if trello_payload:
                     success = update_trello_card(trello_card['id'], trello_payload)
                     if not success:
