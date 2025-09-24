@@ -2580,8 +2580,8 @@ async def send_folder_to_head_of_sales(workflow_id: str, task_data: Dict[str, An
         # Add folder link section
         try:
             workflow = await get_workflow_with_cache(workflow_id)
-            if workflow and workflow.get('folder_path'):
-                folder_link = await dropbox_manager.get_shared_link(workflow['folder_path'])
+            if workflow and workflow.get('dropbox_path'):
+                folder_link = await dropbox_manager.get_shared_link(workflow['dropbox_path'])
                 blocks.append({
                     "type": "section",
                     "text": {
