@@ -1467,8 +1467,8 @@ async def parse_task_number_from_message(message: str) -> Optional[int]:
     
     return None
 
-async def handle_video_upload_with_parsing(channel: str, user_id: str, file_info: Dict[str, Any], message: str):
-    """Handle video upload with task number parsing from message"""
+async def handle_multiple_video_uploads_with_parsing(channel: str, user_id: str, files_info: List[Dict[str, Any]], message: str):
+    """Handle multiple video/image uploads with task number parsing from message"""
     try:
         # Check permissions
         has_permission, error_msg = simple_check_permission(user_id, "upload_video")
@@ -1478,6 +1478,7 @@ async def handle_video_upload_with_parsing(channel: str, user_id: str, file_info
                 text=error_msg
             )
             return
+
         # Parse task number
         task_number = await parse_task_number_from_message(message)
         if not task_number:
@@ -1495,86 +1496,124 @@ async def handle_video_upload_with_parsing(channel: str, user_id: str, file_info
                 text=f"❌ Task #{task_number} not found. Please check the task number."
             )
             return
-        
+
         # Get task number for simplified naming
         task_number = task_data.get('Task #', 0)
-        
+
         # Check existing versions to get next version number
         highest_version = 0
-        base_filename = f"Task{task_number}"
-        
-        # Check all folders for existing files with this task number
+        base_folder_name = f"Task{task_number}"
+
+        # Check all folders for existing TaskX_VY folders
         for folder_name, folder_path in DROPBOX_FOLDERS.items():
             if folder_name == "raw":  # Skip raw folder
                 continue
-                
+
             try:
                 result = dropbox_manager.dbx.files_list_folder(folder_path)
-                
+
                 while True:
                     for entry in result.entries:
-                        if hasattr(entry, 'name') and entry.name.startswith(base_filename + "_"):
-                            # Extract version number from filename
-                            # Format: Task{number}_{version}.extension
-                            name_without_ext = entry.name.rsplit('.', 1)[0]
-                            parts = name_without_ext.split('_')
+                        if hasattr(entry, 'name') and entry.name.startswith(base_folder_name + "_V"):
+                            # Extract version number from folder name
+                            # Format: TaskX_VY
+                            parts = entry.name.split('_V')
                             if len(parts) == 2 and parts[-1].isdigit():
                                 version = int(parts[-1])
                                 highest_version = max(highest_version, version)
-                    
+
                     if not result.has_more:
                         break
                     result = dropbox_manager.dbx.files_list_folder_continue(result.cursor)
-                    
+
             except Exception as e:
                 logger.warning(f"Error checking folder {folder_path}: {e}")
-        
+
         # Next version
         new_version = highest_version + 1
-        
-        # Get file extension
-        original_filename = file_info.get("name", "video.mp4")
-        extension = original_filename.rsplit('.', 1)[-1] if '.' in original_filename else 'mp4'
-        
-        # Construct final filename with simplified format
-        final_filename = f"Task{task_number}_{new_version}.{extension}"
-        
-        # Notify user
+
+        # Create folder name: TaskX_VY
+        folder_name = f"Task{task_number}_V{new_version}"
+
+        # Notify user about upload
+        file_count = len(files_info)
+        file_names = [f.get('name', 'unknown') for f in files_info]
+
         await slack_client.chat_postMessage(
             channel=channel,
-            text=f"📤 Uploading video for Task #{task_number}\nFilename: `{final_filename}`"
+            text=f"📤 Uploading {file_count} file{'s' if file_count > 1 else ''} for Task #{task_number}\n📁 Folder: `{folder_name}`\n📄 Files: {', '.join(file_names)}"
         )
-        
-        # Download file from Slack
-        file_id = file_info.get("id")
-        file_response = await slack_client.files_info(file=file_id)
-        if not file_response["ok"]:
-            raise Exception("Failed to get file info")
-        
-        file_data = file_response["file"]
-        file_url = file_data.get("url_private_download") or file_data.get("url_private")
-        
-        # Download file
-        headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
-        import requests
-        response = requests.get(file_url, headers=headers)
-        if response.status_code != 200:
-            raise Exception(f"Failed to download file: {response.status_code}")
-        
-        file_content = response.content
-        
-        # Upload to Pending folder
-        path = await dropbox_manager.upload_video(file_content, final_filename, "pending")
-        
-        # Update Excel status with the actual version number
+
+        # Create folder in Dropbox Pending directory
+        folder_path = f"{DROPBOX_FOLDERS['pending']}/{folder_name}"
+
+        # Process each file with indexing
+        uploaded_files = []
+        for index, file_info in enumerate(files_info, 1):
+            try:
+                # Download file from Slack
+                file_id = file_info.get("id")
+                file_response = await slack_client.files_info(file=file_id)
+                if not file_response["ok"]:
+                    logger.error(f"Failed to get file info for {file_info.get('name')}")
+                    continue
+
+                file_data = file_response["file"]
+                file_url = file_data.get("url_private_download") or file_data.get("url_private")
+
+                # Download file content
+                headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
+                import requests
+                response = requests.get(file_url, headers=headers)
+                if response.status_code != 200:
+                    logger.error(f"Failed to download file {file_info.get('name')}: {response.status_code}")
+                    continue
+
+                file_content = response.content
+
+                # Create indexed filename
+                original_filename = file_info.get("name", f"file{index}.mp4")
+                name_part, extension = original_filename.rsplit('.', 1) if '.' in original_filename else (original_filename, 'mp4')
+                indexed_filename = f"{name_part}_{index}.{extension}"
+
+                # Upload to folder
+                file_path = f"{folder_path}/{indexed_filename}"
+                upload_result = await dropbox_manager.dbx.files_upload(
+                    file_content,
+                    file_path,
+                    mode=dropbox.files.WriteMode.overwrite,
+                    autorename=True
+                )
+
+                uploaded_files.append({
+                    "filename": indexed_filename,
+                    "path": file_path,
+                    "original_name": original_filename
+                })
+
+                logger.info(f"Uploaded {indexed_filename} to {file_path}")
+
+            except Exception as e:
+                logger.error(f"Error uploading file {file_info.get('name', 'unknown')}: {e}")
+                continue
+
+        if not uploaded_files:
+            await slack_client.chat_postMessage(
+                channel=channel,
+                text="❌ Failed to upload any files. Please try again."
+            )
+            return
+
+        # Update Excel status with the version number
         await update_excel_status(task_number, "Pending", version=new_version)
-        
+
         # Send to reviewer for approval
-        await send_video_to_reviewer(task_number, final_filename, path, user_id, task_data)
-        
+        await send_folder_to_reviewer(task_number, folder_name, folder_path, user_id, task_data, uploaded_files)
+
+        uploaded_count = len(uploaded_files)
         await slack_client.chat_postMessage(
             channel=channel,
-            text=f"✅ Video uploaded successfully!\n📁 Location: Pending folder\n🔍 Sent to reviewer for approval"
+            text=f"✅ Successfully uploaded {uploaded_count} file{'s' if uploaded_count > 1 else ''} to folder `{folder_name}`!\n📁 Location: Pending folder\n🔍 Sent to reviewer for approval"
         )
         
     except Exception as e:
@@ -1584,129 +1623,129 @@ async def handle_video_upload_with_parsing(channel: str, user_id: str, file_info
             text=f"❌ Error uploading video: {str(e)}"
         )
 
-async def send_video_to_reviewer(task_number: int, filename: str, dropbox_path: str, videographer_id: str, task_data: dict):
-    """Send video to reviewer for approval"""
+async def send_folder_to_reviewer(task_number: int, folder_name: str, folder_path: str, videographer_id: str, task_data: dict, uploaded_files: list):
+    """Send folder with multiple files to reviewer for approval"""
     try:
         # Get reviewer info
         from management import load_videographer_config
         config = load_videographer_config()
         reviewer = config.get("reviewer", {})
         reviewer_channel = reviewer.get("slack_channel_id")
-        
+
         if not reviewer_channel:
             logger.error("Reviewer channel not configured")
             return
-        
+
         # Create workflow ID
-        workflow_id = f"video_approval_{task_number}_{datetime.now().timestamp()}"
-        
-        # Get version from filename
-        version_match = re.search(r'_(\d+)\.', filename)
+        workflow_id = f"folder_approval_{task_number}_{datetime.now().timestamp()}"
+
+        # Extract version from folder name (TaskX_VY)
+        version_match = re.search(r'_V(\d+)', folder_name)
         version = int(version_match.group(1)) if version_match else 1
-        
+
         # Store workflow data
         workflow_data = {
             "task_number": task_number,
-            "filename": filename,
-            "dropbox_path": dropbox_path,
+            "folder_name": folder_name,
+            "folder_path": folder_path,
+            "dropbox_path": folder_path,  # For compatibility with existing handlers
+            "uploaded_files": uploaded_files,
             "videographer_id": videographer_id,
             "task_data": task_data,
             "stage": "reviewer",
             "created_at": datetime.now(UAE_TZ).isoformat(),
             "version": version,
-            "status": "pending"
+            "status": "pending",
+            "type": "folder",  # Mark as folder workflow
+            "version_info": {  # For compatibility with existing handlers
+                "version": version,
+                "files": uploaded_files
+            }
         }
-        
+
         # Save to database and cache
         approval_workflows[workflow_id] = workflow_data
         await save_workflow_async(workflow_id, workflow_data)
-        
+
+        # Get folder link
+        try:
+            folder_link = await dropbox_manager.get_shared_link(folder_path)
+            folder_display = f"<{folder_link}|{folder_name}>"
+        except Exception as e:
+            logger.warning(f"Could not get folder link: {e}")
+            folder_display = folder_name
+
+        file_count = len(uploaded_files)
+
         # Build message blocks
         blocks = [
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"*🎥 New Video Submission for Review*\n\n*Task #{task_number}* - `{filename}` (Version {version})"
+                    "text": f"*🎥 New Folder Submission for Review*\n\n*Task #{task_number}* - {folder_display} (Version {version})\n\n*Files:* {file_count} file{'s' if file_count != 1 else ''}"
                 }
             },
             {
                 "type": "section",
                 "fields": [
-                    {"type": "mrkdwn", "text": f"*Brand:* {task_data.get('Brand', 'N/A')}"},
-                    {"type": "mrkdwn", "text": f"*Location:* {task_data.get('Location', 'N/A')}"},
-                    {"type": "mrkdwn", "text": f"*Reference:* {task_data.get('Reference Number', 'N/A')}"},
-                    {"type": "mrkdwn", "text": f"*Sales Person:* {task_data.get('Sales Person', 'N/A')}"},
-                    {"type": "mrkdwn", "text": f"*Campaign Start:* {task_data.get('Campaign Start Date', 'N/A')}"},
-                    {"type": "mrkdwn", "text": f"*Campaign End:* {task_data.get('Campaign End Date', 'N/A')}"},
-                    {"type": "mrkdwn", "text": f"*Videographer:* {task_data.get('Videographer', 'N/A')}"},
-                    {"type": "mrkdwn", "text": f"*Filming Date:* {task_data.get('Filming Date', 'N/A')}"},
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Brand:* {task_data.get('Brand', 'N/A')}"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Location:* {task_data.get('Location', 'N/A')}"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Reference:* {task_data.get('Reference', 'N/A')}"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Date:* {task_data.get('Date', 'N/A')}"
+                    }
                 ]
             },
             {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"📹 <{await dropbox_manager.get_shared_link(dropbox_path)}|*Click to View/Download Video*>"
-                }
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "✅ Approve"
+                        },
+                        "style": "primary",
+                        "action_id": "approve_folder_reviewer",
+                        "value": workflow_id
+                    },
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "❌ Reject"
+                        },
+                        "style": "danger",
+                        "action_id": "reject_folder_reviewer",
+                        "value": workflow_id
+                    }
+                ]
             }
         ]
-        
-        # Add version history if version > 1
-        if version > 1:
-            rejection_history = await get_rejection_history(task_number)
-            if rejection_history:
-                history_text = "*📋 Previous Rejections/Returns:*"
-                for rejection in rejection_history:
-                    rejection_type = rejection.get('type', 'Rejection')
-                    timestamp = rejection.get('at', 'Unknown time')
-                    history_text += f"\n• Version {rejection['version']} ({rejection_type}) - {rejection['class']}"
-                    if rejection.get('comments'):
-                        history_text += f": {rejection['comments']}"
-                
-                blocks.append({
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": history_text
-                    }
-                })
-        
-        # Add action buttons
-        blocks.append({
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "✅ Accept"},
-                    "style": "primary",
-                    "action_id": "approve_video_reviewer",
-                    "value": workflow_id
-                },
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "❌ Reject"},
-                    "style": "danger",
-                    "action_id": "reject_video_reviewer",
-                    "value": workflow_id
-                }
-            ]
-        })
-        
-        # Send message with buttons
+
+        # Send message to reviewer
         result = await slack_client.chat_postMessage(
             channel=reviewer_channel,
-            text=f"🎥 New video for review",
-            blocks=blocks
+            blocks=blocks,
+            text=f"New folder submission: Task #{task_number} - {folder_name}"
         )
-        
-        # Save message timestamp for recovery
-        workflow_data['reviewer_msg_ts'] = result['ts']
-        approval_workflows[workflow_id] = workflow_data
-        await save_workflow_async(workflow_id, workflow_data)
-        
+
+        logger.info(f"Folder approval request sent to reviewer for Task #{task_number}, folder: {folder_name}")
+
     except Exception as e:
-        logger.error(f"Error sending to reviewer: {e}")
+        logger.error(f"Error sending folder to reviewer: {e}")
+
 
 async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url: str):
     """Handle reviewer approval - send directly to Head of Sales"""
@@ -2625,19 +2664,20 @@ async def send_folder_to_head_of_sales(workflow_id: str, task_data: Dict[str, An
             }
         ]
 
-        # Add files information
-        if files:
-            files_text = "*📁 Files in submission:*\n"
-            for file_info in files:
-                files_text += f"• {file_info['dropbox_name']}\n"
-
-            blocks.append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": files_text
-                }
-            })
+        # Add folder link section
+        try:
+            workflow = await get_workflow_with_cache(workflow_id)
+            if workflow and workflow.get('folder_path'):
+                folder_link = await dropbox_manager.get_shared_link(workflow['folder_path'])
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"📁 <{folder_link}|*Click to View/Download Files*>"
+                    }
+                })
+        except Exception as e:
+            logger.warning(f"Could not get folder link: {e}")
 
         # Add action buttons
         blocks.append({

@@ -190,16 +190,17 @@ async def slack_events(request: Request):
                     # Handle video/photo upload with task number
                     try:
                         # Import the new handler
-                        from video_upload_system import handle_video_upload_with_parsing
-                        
-                        # Get the file (video or image)
-                        file_to_upload = video_files[0] if video_files else files[0]
-                        
+                        from video_upload_system import handle_multiple_video_uploads_with_parsing
+
+                        # Get all video/image files
+                        files_to_upload = video_files if video_files else [f for f in files if f.get("mimetype", "").startswith(("video/", "image/"))]
+
                         # Debug logging
-                        logger.info(f"Processing video upload - User: {user_id}, Channel: {channel}, Text: '{text}', File: {file_to_upload.get('name', 'unknown')}")
-                        
-                        # Process the upload in background (avoid Slack timeout)
-                        asyncio.create_task(handle_video_upload_with_parsing(channel, user_id, file_to_upload, text))
+                        file_names = [f.get('name', 'unknown') for f in files_to_upload]
+                        logger.info(f"Processing video upload(s) - User: {user_id}, Channel: {channel}, Text: '{text}', Files: {file_names}")
+
+                        # Process the upload(s) in background (avoid Slack timeout)
+                        asyncio.create_task(handle_multiple_video_uploads_with_parsing(channel, user_id, files_to_upload, text))
                         
                     except Exception as e:
                         logger.error(f"Error handling video upload: {e}")
