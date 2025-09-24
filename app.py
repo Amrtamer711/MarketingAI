@@ -177,8 +177,10 @@ async def slack_events(request: Request):
             if files:
                 # Check for video files first
                 video_files = [f for f in files if f.get("mimetype", "").startswith("video/")]
-                
-                if video_files or (files and text and any(word in text.lower() for word in ['task', '#'])):
+                # Check for zip files
+                zip_files = [f for f in files if f.get("mimetype", "").startswith(("application/zip", "application/x-zip-compressed")) or f.get("name", "").lower().endswith('.zip')]
+
+                if video_files or zip_files or (files and text and any(word in text.lower() for word in ['task', '#'])):
                     # Dedupe uploads across distributed instances
                     team_id = data.get("team_id", "")
                     file_ids = ",".join(sorted([f.get("id", "") for f in files]))
@@ -192,8 +194,13 @@ async def slack_events(request: Request):
                         # Import the new handler
                         from video_upload_system import handle_multiple_video_uploads_with_parsing
 
-                        # Get all video/image files
-                        files_to_upload = video_files if video_files else [f for f in files if f.get("mimetype", "").startswith(("video/", "image/"))]
+                        # Prioritize ZIP files, then video/image files
+                        if zip_files:
+                            files_to_upload = zip_files
+                        elif video_files:
+                            files_to_upload = video_files
+                        else:
+                            files_to_upload = [f for f in files if f.get("mimetype", "").startswith(("video/", "image/", "application/zip", "application/x-zip-compressed")) or f.get("name", "").lower().endswith('.zip')]
 
                         # Debug logging
                         file_names = [f.get('name', 'unknown') for f in files_to_upload]
