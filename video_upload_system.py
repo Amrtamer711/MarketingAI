@@ -2458,6 +2458,27 @@ async def handle_folder_reviewer_approval(workflow_id: str, user_id: str, respon
         version = workflow['version_info'].get('version', 1)
         await update_excel_status_with_folder(task_number, "submitted", folder_name, version=version)
 
+        # Get folder link for notifications
+        folder_link = await dropbox_manager.get_shared_link(workflow['dropbox_path'])
+
+        # Notify videographer of reviewer approval
+        videographer_name = task_data.get('Videographer', '')
+        videographer_id = None
+
+        from management import load_videographer_config
+        config = load_videographer_config()
+        videographers = config.get('videographers', {})
+
+        if videographer_name and videographer_name in videographers:
+            videographer_info = videographers[videographer_name]
+            videographer_id = videographer_info.get('slack_user_id') if isinstance(videographer_info, dict) else None
+
+        if videographer_id:
+            await slack_client.chat_postMessage(
+                channel=videographer_id,
+                text=f"✅ Good news! Your folder submission for Task #{task_number} has been approved by the reviewer and sent to Head of Sales for final approval.\n\nFolder: {folder_name}\nVersion: {version}\n\n📁 <{folder_link}|Click to View Folder>"
+            )
+
         # Send to Head of Sales
         await send_folder_to_head_of_sales(workflow_id, task_data, folder_name, version, workflow['version_info'].get('files', []))
 
@@ -2525,6 +2546,68 @@ async def handle_folder_reviewer_rejection(workflow_id: str, user_id: str, respo
         await update_excel_status_with_folder(task_number, "rejected", folder_name, version=version,
                                             rejection_reason=rejection_comments, rejection_class=rejection_class,
                                             rejected_by="Reviewer")
+
+        # Get folder link from rejected location
+        folder_link = await dropbox_manager.get_shared_link(workflow['dropbox_path'])
+
+        # Get rejection history
+        rejection_history = await get_rejection_history(task_number)
+
+        # Create rejection history text including current rejection
+        history_text = ""
+        if rejection_history:
+            history_text = "\n\n📋 *Rejection History:*"
+            for rejection in rejection_history:
+                rejection_type = rejection.get('type', 'Rejection')
+                timestamp = rejection.get('at', 'Unknown time')
+                history_text += f"\n• Version {rejection['version']} ({rejection_type}) at {timestamp}: {rejection['class']}"
+                if rejection.get('comments'):
+                    history_text += f" - {rejection['comments']}"
+
+        # Notify videographer with rejection details and history
+        videographer_name = task_data.get('Videographer', '')
+        videographer_id = None
+
+        from management import load_videographer_config
+        config = load_videographer_config()
+        videographers = config.get('videographers', {})
+
+        if videographer_name and videographer_name in videographers:
+            videographer_info = videographers[videographer_name]
+            videographer_id = videographer_info.get('slack_user_id') if isinstance(videographer_info, dict) else None
+
+        if videographer_id:
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"❌ *Your folder submission for Task #{task_number} was rejected by the reviewer*\n\nFolder: {folder_name}\nVersion: {version}\n\n*Rejection Category:* {rejection_class}\n*Comments:* {rejection_comments or 'No comments provided'}\n\nThe folder has been moved to the Rejected folder."
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"📁 <{folder_link}|*Click to View Rejected Folder*>"
+                    }
+                }
+            ]
+
+            if history_text:
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": history_text
+                    }
+                })
+
+            await slack_client.chat_postMessage(
+                channel=videographer_id,
+                text=f"❌ Folder rejected by reviewer",
+                blocks=blocks
+            )
 
         # Update the original message
         await post_response_url(response_url, {
@@ -2669,12 +2752,74 @@ async def handle_folder_hos_approval(workflow_id: str, user_id: str, response_ur
         version = workflow['version_info'].get('version', 1)
         await update_excel_status_with_folder(task_number, "accepted", folder_name, version=version)
 
+        # CLEANUP: Find and reject all other folder versions of this task
+        await cleanup_other_folder_versions(task_number, version)
+
         # Archive the task
         from db_utils import archive_task
         await asyncio.to_thread(archive_task, task_number)
 
         # Update Trello if applicable
         await update_trello_status(task_number, "accepted")
+
+        # Get folder link for notifications
+        folder_link = await dropbox_manager.get_shared_link(workflow['dropbox_path'])
+
+        # Notify videographer of final acceptance
+        videographer_name = task_data.get('Videographer', '')
+        videographer_id = None
+
+        from management import load_videographer_config
+        config = load_videographer_config()
+        videographers = config.get('videographers', {})
+
+        if videographer_name and videographer_name in videographers:
+            videographer_info = videographers[videographer_name]
+            videographer_id = videographer_info.get('slack_user_id') if isinstance(videographer_info, dict) else None
+
+        if videographer_id:
+            await slack_client.chat_postMessage(
+                channel=videographer_id,
+                text=f"🎉 Excellent news! Your folder submission for Task #{task_number} has been fully accepted by Head of Sales!\n\nFolder: {folder_name}\nVersion: {version}\nStatus: Done\n\n📁 <{folder_link}|Click to View Final Folder>"
+            )
+
+        # Notify reviewer of final acceptance
+        reviewer = config.get("reviewer", {})
+        reviewer_channel = reviewer.get("slack_channel_id")
+
+        if reviewer_channel:
+            await slack_client.chat_postMessage(
+                channel=reviewer_channel,
+                text=f"✅ Folder fully accepted by Head of Sales\n\nTask #{task_number}: {folder_name}\nVersion: {version}\nThe folder has been moved to the Accepted folder.\n\n📁 <{folder_link}|Click to View Final Folder>"
+            )
+
+        # Notify sales person with final folder link - they can now use it
+        sales_person_name = task_data.get('Sales Person', '')
+        sales_people = config.get("sales_people", {})
+        sales_person = sales_people.get(sales_person_name, {})
+        sales_channel = sales_person.get("slack_channel_id")
+
+        if sales_channel:
+            await slack_client.chat_postMessage(
+                channel=sales_channel,
+                text=f"🎉 Folder ready for use - Approved by Head of Sales",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"🎉 *Folder Ready for Use*\n\nTask #{task_number}\nFolder: {folder_name}\nVersion: {version}\nBrand: {task_data.get('Brand', '')}\nLocation: {task_data.get('Location', '')}\nCampaign: {task_data.get('Campaign Start Date', '')} to {task_data.get('Campaign End Date', '')}\n\n_This folder has been approved by both the Reviewer and Head of Sales and is ready for your campaign._"
+                        }
+                    },
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"📁 <{folder_link}|*Download Final Folder*>"
+                        }
+                    }
+                ]
+            )
 
         # Update the original message
         await post_response_url(response_url, {
@@ -2741,6 +2886,107 @@ async def handle_folder_hos_rejection(workflow_id: str, user_id: str, response_u
                                             rejection_reason=rejection_comments, rejection_class=rejection_class,
                                             rejected_by="Head of Sales")
 
+        # Get folder link from returned location
+        folder_link = await dropbox_manager.get_shared_link(workflow['dropbox_path'])
+
+        # Get rejection history
+        rejection_history = await get_rejection_history(task_number)
+
+        # Create rejection history text including current rejection
+        history_text = ""
+        if rejection_history:
+            history_text = "\n\n📋 *Rejection History:*"
+            for rejection in rejection_history:
+                rejection_type = rejection.get('type', 'Rejection')
+                timestamp = rejection.get('at', 'Unknown time')
+                history_text += f"\n• Version {rejection['version']} ({rejection_type}) at {timestamp}: {rejection['class']}"
+                if rejection.get('comments'):
+                    history_text += f" - {rejection['comments']}"
+
+        # Load config for notifications
+        from management import load_videographer_config
+        config = load_videographer_config()
+
+        # Notify videographer of HoS rejection
+        videographer_name = task_data.get('Videographer', '')
+        videographer_id = None
+        videographers = config.get('videographers', {})
+
+        if videographer_name and videographer_name in videographers:
+            videographer_info = videographers[videographer_name]
+            videographer_id = videographer_info.get('slack_user_id') if isinstance(videographer_info, dict) else None
+
+        if videographer_id:
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"⚠️ *Your folder submission for Task #{task_number} was returned by Head of Sales*\n\nFolder: {folder_name}\nVersion: {version}\n\n*Return Category:* {rejection_class}\n*Comments:* {rejection_comments or 'No comments provided'}\n\n_Note: This folder was previously approved by the reviewer_\n\nThe folder has been moved to the Returned folder. Please revise and resubmit."
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"📁 <{folder_link}|*Click to View Returned Folder*>"
+                    }
+                }
+            ]
+
+            if history_text:
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": history_text
+                    }
+                })
+
+            await slack_client.chat_postMessage(
+                channel=videographer_id,
+                text=f"⚠️ Folder returned by Head of Sales",
+                blocks=blocks
+            )
+
+        # Notify reviewer with rejection history
+        reviewer = config.get("reviewer", {})
+        reviewer_channel = reviewer.get("slack_channel_id")
+
+        if reviewer_channel:
+            reviewer_blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"⚠️ *Folder Returned by Head of Sales*\n\nTask #{task_number}: {folder_name}\nVersion: {version}\nReturn Category: {rejection_class}\nComments: {rejection_comments or 'No comments provided'}\n\n_This folder was previously approved by you and has now been returned by Head of Sales._"
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"📁 <{folder_link}|*Click to View/Download Folder*> (moved to Returned folder)"
+                    }
+                }
+            ]
+
+            # Add rejection history
+            if history_text:
+                reviewer_blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": history_text
+                    }
+                })
+
+            await slack_client.chat_postMessage(
+                channel=reviewer_channel,
+                text=f"⚠️ Folder returned by Head of Sales for Task #{task_number}",
+                blocks=reviewer_blocks
+            )
+
         # Update the original message
         await post_response_url(response_url, {
             "replace_original": True,
@@ -2755,6 +3001,193 @@ async def handle_folder_hos_rejection(workflow_id: str, user_id: str, response_u
             "replace_original": True,
             "text": f"❌ Error processing return: {str(e)}"
         })
+
+async def cleanup_other_folder_versions(task_number: int, accepted_version: int):
+    """When a folder is accepted, find and reject all other folder versions in the pipeline"""
+    try:
+        logger.info(f"Starting folder cleanup for Task #{task_number}, accepted version: {accepted_version}")
+
+        # Search pattern for this task's folders
+        base_foldername = f"Task{task_number}_"
+        folders_to_reject = []
+        workflows_to_cancel = []
+
+        # Search only folders in active pipeline (not rejected/returned/accepted)
+        folders_to_search = ["pending", "submitted"]
+
+        for folder_location in folders_to_search:
+            folder_path = DROPBOX_FOLDERS.get(folder_location)
+            if not folder_path:
+                continue
+
+            try:
+                # List folders in location
+                result = dropbox_manager.dbx.files_list_folder(folder_path)
+
+                while True:
+                    for entry in result.entries:
+                        if isinstance(entry, dropbox.files.FolderMetadata):
+                            # Check if this is a folder for the same task
+                            if entry.name.startswith(base_foldername):
+                                # Extract version from foldername (Task123_V2_20240924_142030)
+                                version_match = re.search(r'_V(\d+)_', entry.name)
+                                if version_match:
+                                    folder_version = int(version_match.group(1))
+                                    # Don't reject the accepted version
+                                    if folder_version != accepted_version:
+                                        folders_to_reject.append({
+                                            'path': entry.path_display,
+                                            'foldername': entry.name,
+                                            'folder_location': folder_location,
+                                            'version': folder_version
+                                        })
+
+                    # Check if there are more entries
+                    if not result.has_more:
+                        break
+                    result = dropbox_manager.dbx.files_list_folder_continue(result.cursor)
+
+            except Exception as e:
+                logger.error(f"Error searching folder location {folder_location}: {e}")
+
+        logger.info(f"Found {len(folders_to_reject)} folders to reject for Task #{task_number}")
+
+        # Move all found folders to rejected location
+        for folder_info in folders_to_reject:
+            try:
+                # Move to rejected folder location
+                to_path = f"{DROPBOX_FOLDERS['rejected']}/{folder_info['foldername']}"
+
+                # Check if folder already exists in rejected location
+                try:
+                    dropbox_manager.dbx.files_get_metadata(to_path)
+                    # Folder exists, need to rename
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    to_path = f"{DROPBOX_FOLDERS['rejected']}/{folder_info['foldername']}_dup_{timestamp}"
+                except:
+                    # Folder doesn't exist, proceed normally
+                    pass
+
+                dropbox_manager.dbx.files_move_v2(folder_info['path'], to_path)
+
+                logger.info(f"Moved folder {folder_info['foldername']} from {folder_info['folder_location']} to rejected")
+
+                # Find and cancel any active workflows for this folder
+                for workflow_id, workflow in list(approval_workflows.items()):
+                    if (workflow.get('task_number') == task_number and
+                        workflow.get('folder_name') == folder_info['foldername']):
+                        workflows_to_cancel.append((workflow_id, workflow))
+
+            except Exception as e:
+                logger.error(f"Error moving folder {folder_info['foldername']} to rejected: {e}")
+
+        # Also check database for workflows not in memory
+        try:
+            all_pending_workflows = await get_all_pending_workflows_async()
+            for workflow in all_pending_workflows:
+                if (workflow.get('task_number') == task_number and
+                    workflow.get('workflow_id') not in [w[0] for w in workflows_to_cancel]):
+                    # Extract version from workflow folder_name
+                    version_match = re.search(r'_V(\d+)_', workflow.get('folder_name', ''))
+                    if version_match:
+                        folder_version = int(version_match.group(1))
+                        if folder_version != accepted_version:
+                            workflows_to_cancel.append((workflow['workflow_id'], workflow))
+        except Exception as e:
+            logger.error(f"Error checking database for folder workflows: {e}")
+
+        # Cancel active workflows and update messages
+        for workflow_id, workflow in workflows_to_cancel:
+            try:
+                logger.info(f"Canceling folder workflow {workflow_id} for {workflow['folder_name']}")
+
+                # Update Slack messages based on workflow status
+                status = workflow.get('status', '')
+
+                # Delete reviewer messages if available
+                if workflow.get('reviewer_msg_ts') and workflow.get('reviewer_msg_channel'):
+                    try:
+                        await slack_client.chat_delete(
+                            channel=workflow['reviewer_msg_channel'],
+                            ts=workflow['reviewer_msg_ts']
+                        )
+                        logger.info(f"Deleted reviewer message for {workflow['folder_name']}")
+                    except Exception as e:
+                        if "message_not_found" not in str(e):
+                            logger.warning(f"Could not delete reviewer message: {e}")
+
+                # Delete HOS messages if available
+                if workflow.get('hos_msg_ts') and workflow.get('hos_msg_channel'):
+                    try:
+                        await slack_client.chat_delete(
+                            channel=workflow['hos_msg_channel'],
+                            ts=workflow['hos_msg_ts']
+                        )
+                        logger.info(f"Deleted HOS message for {workflow['folder_name']}")
+                    except Exception as e:
+                        if "message_not_found" not in str(e):
+                            logger.warning(f"Could not delete HOS message: {e}")
+
+                # Remove workflow from cache and database
+                if workflow_id in approval_workflows:
+                    del approval_workflows[workflow_id]
+                await delete_workflow_async(workflow_id)
+
+            except Exception as e:
+                logger.error(f"Error canceling folder workflow {workflow_id}: {e}")
+
+        # Notify videographers about auto-rejected folders
+        videographers_notified = set()
+        for folder_info in folders_to_reject:
+            try:
+                # Find videographer for this folder
+                videographer_id = None
+                for workflow_id, workflow in workflows_to_cancel:
+                    if workflow.get('folder_name') == folder_info['foldername']:
+                        # Get videographer from task data
+                        task_data = workflow.get('task_data', {})
+                        videographer_name = task_data.get('Videographer', '')
+
+                        from management import load_videographer_config
+                        config = load_videographer_config()
+                        videographers = config.get('videographers', {})
+
+                        if videographer_name and videographer_name in videographers:
+                            videographer_info = videographers[videographer_name]
+                            videographer_id = videographer_info.get('slack_user_id') if isinstance(videographer_info, dict) else None
+                        break
+
+                if videographer_id and videographer_id not in videographers_notified:
+                    videographers_notified.add(videographer_id)
+
+                    # Count how many folders were rejected for this videographer
+                    videographer_folders = [f for f in folders_to_reject if any(
+                        w[1].get('task_data', {}).get('Videographer') ==
+                        next((wf[1].get('task_data', {}).get('Videographer') for wf_id, wf in workflows_to_cancel
+                              if wf.get('folder_name') == f['foldername']), None)
+                        for w in workflows_to_cancel if w[1].get('folder_name') == f['foldername']
+                    )]
+
+                    if videographer_folders:
+                        await slack_client.chat_postMessage(
+                            channel=videographer_id,
+                            text=f"ℹ️ Your folders for Task #{task_number} have been auto-rejected",
+                            blocks=[{
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f"ℹ️ *Folders Auto-Rejected*\n\nTask #{task_number} - Version {accepted_version} has been accepted.\n\nThe following folders in the approval pipeline were automatically moved to rejected:\n" +
+                                           "\n".join([f"• `{f['foldername']}` (v{f['version']}) from {f['folder_location']}" for f in videographer_folders])
+                                }
+                            }]
+                        )
+            except Exception as e:
+                logger.error(f"Error notifying videographer about folder cleanup: {e}")
+
+        logger.info(f"Folder cleanup completed for Task #{task_number}")
+
+    except Exception as e:
+        logger.error(f"Error in cleanup_other_folder_versions: {e}")
 
 async def handle_hos_rejection(workflow_id: str, user_id: str, response_url: str, rejection_comments: Optional[str] = None):
     """Handle Head of Sales rejection - move back to returned"""
