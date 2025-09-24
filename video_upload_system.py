@@ -2446,16 +2446,8 @@ async def handle_folder_reviewer_approval(workflow_id: str, user_id: str, respon
 
         # Move folder to Submitted to Sales
         from_path = workflow['dropbox_path']
-        logger.info(f"Moving folder from: {from_path} to submitted folder")
-
-        try:
-            moved_path = await dropbox_manager.move_folder(from_path, "submitted")
-            workflow['dropbox_path'] = moved_path
-            logger.info(f"Successfully moved folder to: {moved_path}")
-        except Exception as e:
-            logger.error(f"Failed to move folder: {e}")
-            # Don't update path - keep original location so shared links work
-            logger.warning(f"Folder remains at original location: {from_path}")
+        moved_path = await dropbox_manager.move_folder(from_path, "submitted")
+        workflow['dropbox_path'] = moved_path
 
         # Update workflow status
         workflow['reviewer_approved'] = True
