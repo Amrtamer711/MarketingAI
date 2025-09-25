@@ -298,7 +298,7 @@ def archive_task(task_number: int) -> bool:
                 """, (
                     row["task_number"], row["Brand"], row["Campaign Start Date"], row["Campaign End Date"], row["Reference Number"],
                     row["Location"], row["Sales Person"], row["Submitted By"], row["Status"], row["Filming Date"],
-                    row["Videographer"], row.get("Task Type", "videography"), row.get("Submission Folder", ""), row["Current Version"], row["Version History"], row["Pending Timestamps"],
+                    row["Videographer"], row["Task Type"] if "Task Type" in row.keys() else "videography", row["Submission Folder"] if "Submission Folder" in row.keys() else "", row["Current Version"], row["Version History"], row["Pending Timestamps"],
                     row["Submitted Timestamps"], row["Returned Timestamps"], row["Rejected Timestamps"], row["Accepted Timestamps"],
                     datetime.now(UAE_TZ).strftime('%d-%m-%Y %H:%M:%S')
                 ))
