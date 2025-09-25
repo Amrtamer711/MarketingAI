@@ -31,13 +31,44 @@ def refresh_access_token():
         raise Exception(f"❌ Failed to refresh token: {response.text}")
 
 def init_dropbox():
-    """Initialize Dropbox client"""
-    global DROPBOX_API_KEY
+    """Initialize Dropbox client with automatic token refresh.
+
+    Prefers SDK-managed refresh via OAuth2 flow using refresh token and app credentials.
+    Falls back to manual refresh if SDK init fails.
+    """
     try:
-        # Refresh token if needed
-        DROPBOX_API_KEY = refresh_access_token()
-        dbx = dropbox.Dropbox(DROPBOX_API_KEY)
-        # Test the connection
+        creds = load_credentials()
+        refresh_token = creds.get("refresh_token")
+        client_id = creds.get("client_id")
+        client_secret = creds.get("client_secret")
+
+        missing = [k for k, v in {
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }.items() if not v]
+
+        if missing:
+            print(f"❌ Missing Dropbox credentials: {', '.join(missing)}")
+        else:
+            oauth2 = dropbox.DropboxOAuth2FlowNoRedirect(
+                consumer_key=client_id,
+                consumer_secret=client_secret
+            )
+            # The Dropbox SDK supports providing refresh token directly to Dropbox client
+            dbx = dropbox.Dropbox(
+                oauth2_access_token=None,
+                oauth2_refresh_token=refresh_token,
+                app_key=client_id,
+                app_secret=client_secret
+            )
+            # Smoke test connection
+            dbx.users_get_current_account()
+            return dbx
+
+        # If SDK-managed path is not possible (missing fields), attempt manual refresh
+        new_access_token = refresh_access_token()
+        dbx = dropbox.Dropbox(new_access_token)
         dbx.users_get_current_account()
         return dbx
     except Exception as e:
