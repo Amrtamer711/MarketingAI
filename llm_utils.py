@@ -879,10 +879,12 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
             if action == 'confirm':
                 # Delete the task
                 result = await delete_task_by_number(task_number)
-                
+
                 if result["success"]:
                     del pending_deletes[user_id]
                     deleted_data = result["task_data"]
+                    trello_archived = result.get("trello_archived", False)
+
                     answer = f"✅ **Task #{task_number} has been deleted successfully!**\n\n"
                     answer += "**Deleted task details:**\n"
                     answer += f"• Brand: {deleted_data.get('Brand', 'N/A')}\n"
@@ -890,10 +892,13 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
                     answer += f"• Location: {deleted_data.get('Location', 'N/A')}\n"
                     answer += f"• Campaign: {deleted_data.get('Campaign Start Date', 'N/A')} to {deleted_data.get('Campaign End Date', 'N/A')}\n"
                     answer += f"• Status: {deleted_data.get('Status', 'N/A')}\n"
-                    
+
                     if str(deleted_data.get('Status', '')).startswith('Assigned to'):
-                        answer += "\n✅ The associated Trello card has been archived."
-                    
+                        if trello_archived:
+                            answer += "\n✅ The associated Trello card has been archived."
+                        else:
+                            answer += "\n⚠️ The task was assigned but no Trello card was found to archive."
+
                     answer += "\n\n_The task has been archived in the history database._"
                 else:
                     answer = f"❌ Error deleting Task #{task_number}: {result.get('error', 'Unknown error')}"

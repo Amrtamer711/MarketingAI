@@ -705,15 +705,47 @@ async def check_duplicate_async(reference_number: str) -> Dict[str, Any]:
 async def delete_task_by_number(task_number: int) -> Dict[str, Any]:
     """Delete a task by task number (archive into history then remove from live)"""
     try:
+        # Get task data first to return it and check if it has a Trello card
+        task_data = get_task_by_number(task_number)
+        if not task_data:
+            return {"success": False, "error": "Task not found"}
+
         # First update the task status to "Archived"
         with _connect() as conn:
             conn.execute(f"UPDATE {LIVE_TABLE} SET Status='Archived' WHERE task_number=?", (task_number,))
-        
-        # Then archive the task
+
+        # Archive the Trello card if task was assigned to a videographer
+        trello_archived = False
+        if str(task_data.get('Status', '')).startswith('Assigned to'):
+            try:
+                from trello_utils import get_trello_card_by_task_number, archive_trello_card
+                logger.info(f"Looking for Trello card for Task #{task_number}")
+
+                card = await asyncio.to_thread(get_trello_card_by_task_number, task_number)
+
+                if card:
+                    logger.info(f"Found Trello card '{card['name']}' (ID: {card['id']})")
+                    success = await asyncio.to_thread(archive_trello_card, card['id'])
+                    if success:
+                        logger.info(f"✅ Archived Trello card for Task #{task_number}")
+                        trello_archived = True
+                    else:
+                        logger.warning(f"⚠️ Failed to archive Trello card for Task #{task_number}")
+                else:
+                    logger.info(f"No Trello card found for Task #{task_number}")
+            except Exception as e:
+                logger.error(f"Error archiving Trello card for Task #{task_number}: {e}")
+
+        # Then archive the task in database
         ok = archive_task(task_number)
         if ok:
-            return {"success": True, "task_data": {"Task #": task_number}}
-        return {"success": False, "error": "Task not found"}
+            # Return task data with trello status
+            return {
+                "success": True,
+                "task_data": task_data,
+                "trello_archived": trello_archived
+            }
+        return {"success": False, "error": "Failed to archive task"}
     except Exception as e:
         logger.error(f"Error deleting task {task_number}: {e}")
         return {"success": False, "error": str(e)}
