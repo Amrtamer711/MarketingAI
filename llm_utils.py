@@ -453,6 +453,15 @@ IMPORTANT: Use natural language in messages - say 'Sales Person' not 'sales_pers
             # Apply the edits
             fields = decision.get('fields', {})
             if fields:
+                # Check for invalid videographer change on unassigned tasks
+                current_status = task_data.get('Status', '')
+                if 'Videographer' in fields and current_status == 'Not assigned yet':
+                    return ("❌ **Cannot change videographer for unassigned tasks!**\n\n"
+                           f"Task #{task_number} has status '{current_status}'. "
+                           "You must wait until the task has been assigned to a videographer before you can move it to a different one.\n\n"
+                           "The videographer assignment happens automatically when the task is within 10 working days of the campaign date. "
+                           "Once assigned, you can then change the videographer as needed.")
+
                 # Get or create edit data
                 if user_id not in pending_edits:
                     pending_edits[user_id] = {
@@ -460,7 +469,7 @@ IMPORTANT: Use natural language in messages - say 'Sales Person' not 'sales_pers
                         "current_data": task_data,
                         "updates": {}
                     }
-                
+
                 # Apply only changed fields
                 actual_updates = {}
                 for field, new_value in fields.items():
