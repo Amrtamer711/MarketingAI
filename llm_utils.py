@@ -779,7 +779,7 @@ async def main_llm_loop(channel: str, user_id: str, user_input: str, files: list
     try:
         thinking_response = await slack_client.chat_postMessage(
             channel=channel,
-            text="⏳ Please wait..."
+            text=markdown_to_slack("⏳ Please wait...")
         )
         thinking_msg = thinking_response.get("ts")
     except Exception as e:

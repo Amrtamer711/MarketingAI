@@ -1395,7 +1395,7 @@ async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any
         # Download zip file from Slack
         await slack_client.chat_postMessage(
             channel=channel,
-            text=f"📥 Processing zip file for Task #{task_number}..."
+            text=markdown_to_slack(f"📥 Processing zip file for Task #{task_number}...")
         )
 
         file_id = file_info.get("id")
@@ -1437,7 +1437,7 @@ async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any
             if not extracted_files:
                 await slack_client.chat_postMessage(
                     channel=channel,
-                    text="❌ No valid files found in the zip archive."
+                    text=markdown_to_slack("❌ No valid files found in the zip archive.")
                 )
                 return
 
@@ -1504,7 +1504,7 @@ async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any
             if not uploaded_files:
                 await slack_client.chat_postMessage(
                     channel=channel,
-                    text="❌ Failed to upload any files from the zip archive."
+                    text=markdown_to_slack("❌ Failed to upload any files from the zip archive.")
                 )
                 return
 
@@ -1517,14 +1517,14 @@ async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any
             uploaded_count = len(uploaded_files)
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"✅ Successfully extracted and uploaded {uploaded_count} file{'s' if uploaded_count > 1 else ''} from zip to folder `{folder_name}`!\n📁 Location: Pending folder\n🔍 Sent to reviewer for approval"
+                text=markdown_to_slack(f"✅ Successfully extracted and uploaded {uploaded_count} file{'s' if uploaded_count > 1 else ''} from zip to folder `{folder_name}`!\n📁 Location: Pending folder\n🔍 Sent to reviewer for approval")
             )
 
     except Exception as e:
         logger.error(f"Error processing zip upload: {e}")
         await slack_client.chat_postMessage(
             channel=channel,
-            text=f"❌ Error processing zip file: {str(e)}"
+            text=markdown_to_slack(f"❌ Error processing zip file: {str(e)}")
         )
 
 async def handle_multiple_video_uploads_with_parsing(channel: str, user_id: str, files_info: List[Dict[str, Any]], message: str):
@@ -1535,7 +1535,7 @@ async def handle_multiple_video_uploads_with_parsing(channel: str, user_id: str,
         if not has_permission:
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=error_msg
+                text=markdown_to_slack(error_msg)
             )
             return
 
@@ -1544,7 +1544,7 @@ async def handle_multiple_video_uploads_with_parsing(channel: str, user_id: str,
         if not task_number:
             await slack_client.chat_postMessage(
                 channel=channel,
-                text="❌ Please include the task number in your message (e.g., 'Task #5' or 'task 5')"
+                text=markdown_to_slack("❌ Please include the task number in your message (e.g., 'Task #5' or 'task 5')")
             )
             return
 
@@ -1557,7 +1557,7 @@ async def handle_multiple_video_uploads_with_parsing(channel: str, user_id: str,
             file_names = [f.get('name', 'unknown') for f in files_info]
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"❌ **Only ZIP files are accepted for upload.**\n\n📦 Please zip your files and upload a single .zip file.\n\n*Rejected files:* {', '.join(file_names)}\n\n💡 **Instructions:**\n1. Select all your video/image files\n2. Right-click → Create Archive/Add to ZIP\n3. Upload the .zip file with your task number"
+                text=markdown_to_slack(f"❌ **Only ZIP files are accepted for upload.**\n\n📦 Please zip your files and upload a single .zip file.\n\n*Rejected files:* {', '.join(file_names)}\n\n💡 **Instructions:**\n1. Select all your video/image files\n2. Right-click → Create Archive/Add to ZIP\n3. Upload the .zip file with your task number")
             )
             return
 
@@ -1565,7 +1565,7 @@ async def handle_multiple_video_uploads_with_parsing(channel: str, user_id: str,
         logger.error(f"Error processing upload: {e}")
         await slack_client.chat_postMessage(
             channel=channel,
-            text=f"❌ Error processing upload: {str(e)}\n\n📦 **Remember:** Only ZIP files are accepted for upload."
+            text=markdown_to_slack(f"❌ Error processing upload: {str(e)}\n\n📦 **Remember:** Only ZIP files are accepted for upload.")
         )
 
 async def send_folder_to_reviewer(task_number: int, folder_name: str, folder_path: str, videographer_id: str, task_data: dict, uploaded_files: list):
@@ -1740,7 +1740,7 @@ async def handle_reviewer_approval(workflow_id: str, user_id: str, response_url:
         # Notify videographer of reviewer approval with video link
         await slack_client.chat_postMessage(
             channel=videographer_id,
-            text=f"✅ Good news! Your video for Task #{task_number} has been approved by the reviewer and sent to Head of Sales for final approval.\n\nFilename: `{filename}`\n\n📹 <{video_link}|Click to View Video>"
+            text=markdown_to_slack(f"✅ Good news! Your video for Task #{task_number} has been approved by the reviewer and sent to Head of Sales for final approval.\n\nFilename: `{filename}`\n\n📹 <{video_link}|Click to View Video>")
         )
         
         # Get Head of Sales info
@@ -2104,7 +2104,7 @@ async def handle_sales_approval(workflow_id: str, user_id: str, response_url: st
         # Notify videographer of progress
         await slack_client.chat_postMessage(
             channel=videographer_id,
-            text=f"✅ Good news! Your video for Task #{task_number} has been approved by sales and is now pending Head of Sales approval.\n\nFilename: `{filename}`"
+            text=markdown_to_slack(f"✅ Good news! Your video for Task #{task_number} has been approved by sales and is now pending Head of Sales approval.\n\nFilename: `{filename}`")
         )
         
         # Notify reviewer of sales approval status
@@ -2114,7 +2114,7 @@ async def handle_sales_approval(workflow_id: str, user_id: str, response_url: st
         if reviewer_channel:
             await slack_client.chat_postMessage(
                 channel=reviewer_channel,
-                text=f"✅ Video approved by sales, pending Head of Sales approval\n\nTask #{task_number}: `{filename}`"
+                text=markdown_to_slack(f"✅ Video approved by sales, pending Head of Sales approval\n\nTask #{task_number}: `{filename}`")
             )
         
     except Exception as e:
@@ -2373,7 +2373,7 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
         # Notify videographer of final acceptance with video link
         await slack_client.chat_postMessage(
             channel=videographer_id,
-            text=f"🎉 Excellent news! Your video for Task #{task_number} has been fully accepted by Head of Sales!\n\nFilename: `{filename}`\nStatus: Done\n\n📹 <{video_link}|Click to View Final Video>"
+            text=markdown_to_slack(f"🎉 Excellent news! Your video for Task #{task_number} has been fully accepted by Head of Sales!\n\nFilename: `{filename}`\nStatus: Done\n\n📹 <{video_link}|Click to View Final Video>")
         )
         
         # Load config for notifications
@@ -2387,7 +2387,7 @@ async def handle_hos_approval(workflow_id: str, user_id: str, response_url: str)
         if reviewer_channel:
             await slack_client.chat_postMessage(
                 channel=reviewer_channel,
-                text=f"✅ Video fully accepted by Head of Sales\n\nTask #{task_number}: `{filename}`\nThe video has been moved to the Accepted folder.\n\n📹 <{video_link}|Click to View Final Video>"
+                text=markdown_to_slack(f"✅ Video fully accepted by Head of Sales\n\nTask #{task_number}: `{filename}`\nThe video has been moved to the Accepted folder.\n\n📹 <{video_link}|Click to View Final Video>")
             )
         
         # Notify sales person with final link - they can now use it
