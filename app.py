@@ -13,7 +13,7 @@ from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 
 from clients import slack_client, signature_verifier, api, logger
-from utils import post_response_url
+from utils import post_response_url, markdown_to_slack
 from config import UAE_TZ, SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, OPENAI_API_KEY
 from db_utils import save_task, get_all_tasks_df, init_db_async
 from history import pending_confirmations
@@ -213,7 +213,7 @@ async def slack_events(request: Request):
                         logger.error(f"Error handling video upload: {e}")
                         await slack_client.chat_postMessage(
                             channel=channel,
-                            text="❌ Error processing video upload. Please try again."
+                            text=markdown_to_slack("❌ Error processing video upload. Please try again.")
                         )
                     
                     return JSONResponse({"status": "ok"})

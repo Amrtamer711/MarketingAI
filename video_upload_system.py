@@ -17,7 +17,7 @@ import pandas as pd
 import requests
 
 from clients import slack_client
-from utils import post_response_url
+from utils import post_response_url, markdown_to_slack
 from config import CREDENTIALS_PATH, UAE_TZ, SLACK_BOT_TOKEN, OPENAI_API_KEY, VIDEOGRAPHER_CONFIG_PATH
 from logger import logger
 from simple_permissions import check_permission as simple_check_permission
@@ -1099,7 +1099,7 @@ async def handle_approval_action(action_data: Dict, user_id: str, response_url: 
                     if upload_channel:
                         await slack_client.chat_postMessage(
                             channel=upload_channel,
-                            text=f"📹 Your video `{filename}` was rejected by the reviewer. Please check and resubmit."
+                            text=markdown_to_slack(f"📹 Your video `{filename}` was rejected by the reviewer. Please check and resubmit.")
                         )
                     break
         
@@ -1108,7 +1108,7 @@ async def handle_approval_action(action_data: Dict, user_id: str, response_url: 
         # Send error response
         await slack_client.chat_postMessage(
             channel=user_id,
-            text=f"❌ Error processing approval: {str(e)}"
+            text=markdown_to_slack(f"❌ Error processing approval: {str(e)}")
         )
 
 async def update_approval_message(response_url: str, filename: str, status_text: str, user_id: str):
@@ -1341,7 +1341,7 @@ async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any
         if not task_data:
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"❌ Task #{task_number} not found. Please check the task number."
+                text=markdown_to_slack(f"❌ Task #{task_number} not found. Please check the task number.")
             )
             return
 
@@ -1350,7 +1350,7 @@ async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any
         if not assigned_videographer:
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"❌ Task #{task_number} is not assigned to any videographer yet."
+                text=markdown_to_slack(f"❌ Task #{task_number} is not assigned to any videographer yet.")
             )
             return
 
@@ -1359,7 +1359,7 @@ async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any
         if status == 'Done':
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"❌ Task #{task_number} is already completed (Status: {status}). No uploads allowed for completed tasks."
+                text=markdown_to_slack(f"❌ Task #{task_number} is already completed (Status: {status}). No uploads allowed for completed tasks.")
             )
             return
 
@@ -1378,14 +1378,14 @@ async def handle_zip_upload(channel: str, user_id: str, file_info: Dict[str, Any
         if not uploader_name:
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"❌ You are not registered as a videographer. Please contact admin."
+                text=markdown_to_slack(f"❌ You are not registered as a videographer. Please contact admin.")
             )
             return
 
         if uploader_name != assigned_videographer:
             await slack_client.chat_postMessage(
                 channel=channel,
-                text=f"❌ Task #{task_number} is assigned to {assigned_videographer}, not you ({uploader_name})."
+                text=markdown_to_slack(f"❌ Task #{task_number} is assigned to {assigned_videographer}, not you ({uploader_name}).")
             )
             return
 
